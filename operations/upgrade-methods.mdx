@@ -1,0 +1,393 @@
+---
+title: "Upgrade Methods"
+description: "ISO-based and registry-based approaches for Windows 11 migration"
+icon: "rocket"
+---
+
+## Overview
+
+The migration tool supports **two distinct upgrade methods** to migrate Windows 10 Pro to Windows 11. Each method has different use cases, advantages, and technical implementations.
+
+<CardGroup cols={2}>
+  <Card title="ISO-Based Method" icon="disc-drive" href="#iso-based-method">
+    Direct upgrade using Windows 11 ISO file
+  </Card>
+  <Card title="Registry-Based Method" icon="file-pen" href="#registry-based-method">
+    Windows Update-driven upgrade via registry modification
+  </Card>
+</CardGroup>
+
+## Method Comparison
+
+<ResponseField name="comparison-table">
+  | Feature | ISO-Based Method | Registry-Based Method |
+  |---------|------------------|----------------------|
+  | **Speed** | Faster (direct upgrade) | Slower (downloads updates) |
+  | **Bandwidth** | Low (ISO pre-downloaded) | High (downloads from Windows Update) |
+  | **Control** | High (specific version/build) | Medium (latest available version) |
+  | **Offline Support** | Yes (ISO is local) | No (requires internet) |
+  | **File Size** | ~5-6 GB (ISO) | Variable (downloads as needed) |
+  | **Network Impact** | Minimal | Significant |
+  | **Rollback** | Uses setup.exe arguments | Uses Windows Update mechanism |
+  | **Best For** | Bulk migrations, controlled environments | Individual systems, latest updates |
+</ResponseField>
+
+<Note>
+The default configuration uses the **registry-based method** as specified in the main playbook.
+</Note>
+
+## ISO-Based Method
+
+This method mounts a Windows 11 ISO file and executes the setup directly with specific arguments.
+
+### ISO Preparation
+
+The ISO file must be pre-downloaded and placed in the Ansible role:
+
+```yaml /home/daytona/workspace/source/roles/fase_2/tasks/main.yml:29-44
+- name: 2.1 Crear directorio ISO
+  ansible.windows.win_file:
+    path: "{{ fase_2_dir_whynotwin11 }}/ISO"
+    state: directory
+
+- name: 2.2 Validar existencia de Directorio ISO
+  ansible.windows.win_stat:
+    path: "{{ fase_2_dir_whynotwin11 }}/ISO"
+  register: iso_dir_out
+
+- name: 2.3 Copiar ISO a Directorio
+  ansible.windows.win_copy:
+    src: roles/fase_2/files/Win11_23H2_Spanish_Mexico_x64v2.iso
+    dest: "{{ fase_2_dir_whynotwin11 }}/ISO/Win11_23H2_Spanish_Mexico_x64v2.iso"
+    remote_src: false
+  when: iso_dir_out.stat.exists
+```
+
+<Warning>
+**ISO File Required**: `Win11_23H2_Spanish_Mexico_x64v2.iso` must be in `roles/fase_2/files/`
+</Warning>
+
+### ISO Mounting
+
+The ISO is mounted as a virtual drive and the drive letter is captured:
+
+```yaml /home/daytona/workspace/source/roles/fase_2/tasks/main.yml:52-66
+- name: 2.4 Montar ISO Windows 11 en {{ ansible_fqdn }}
+  ansible.windows.win_shell: |
+    Mount-DiskImage -ImagePath "{{ fase_2_dir_whynotwin11 }}/ISO/Win11_23H2_Spanish_Mexico_x64v2.iso"
+  when: iso_dir_out.stat.exists
+
+- name: 2.5 Obtener la letra de la unidad donde se montó la ISO
+  ansible.windows.win_shell: |
+    Get-Volume -FileSystemLabel "CCCOMA_X64FRE_ES-MX_DV9" | Select-Object -ExpandProperty DriveLetter
+  register: iso_mount
+  args:
+    executable: powershell.exe
+
+- name: 2.6 Mostrar letra de la unidad donde se montó la ISO
+  ansible.builtin.debug:
+    msg: "La ISO de Windows 11 se montó en la unidad: {{ iso_mount.stdout | trim }}"
+```
+
+<Info>
+**Volume Label**: The ISO must have the label `CCCOMA_X64FRE_ES-MX_DV9` (Spanish Mexico edition)
+</Info>
+
+### Setup.exe Execution
+
+The Windows 11 setup is launched with specific arguments for unattended installation:
+
+```yaml /home/daytona/workspace/source/roles/fase_2/tasks/main.yml:70-77
+- name: 3.1 Ejecutar el instalador de Windows 11 desde la ISO montada
+  ansible.windows.win_shell: >
+    Start-Process -FilePath "{{ iso_mount.stdout | trim }}:\setup.exe" -ArgumentList
+    '/auto upgrade', '/quiet', '/eula accept', '/showoobe none', '/priority normal', '/noreboot',
+    '/compat ignorewarning', '/migratedrivers all', '/copylogs C:\temp\ansible' -Wait
+  args:
+    executable: powershell.exe
+  register: upd_w11
+```
+
+### Setup.exe Arguments Explained
+
+<AccordionGroup>
+  <Accordion title="/auto upgrade">
+    Automatically performs an in-place upgrade preserving files, settings, and applications.
+  </Accordion>
+  
+  <Accordion title="/quiet">
+    Runs setup with minimal user interaction (silent mode).
+  </Accordion>
+  
+  <Accordion title="/eula accept">
+    Automatically accepts the End User License Agreement.
+  </Accordion>
+  
+  <Accordion title="/showoobe none">
+    Skips the Out-of-Box Experience (OOBE) after installation.
+  </Accordion>
+  
+  <Accordion title="/priority normal">
+    Runs the setup process at normal priority (not background).
+  </Accordion>
+  
+  <Accordion title="/noreboot">
+    Prevents automatic reboot after setup completes (Ansible handles reboot).
+  </Accordion>
+  
+  <Accordion title="/compat ignorewarning">
+    Ignores compatibility warnings and proceeds with upgrade.
+  </Accordion>
+  
+  <Accordion title="/migratedrivers all">
+    Migrates all compatible drivers from Windows 10 to Windows 11.
+  </Accordion>
+  
+  <Accordion title="/copylogs C:\temp\ansible">
+    Copies installation logs to the specified directory for troubleshooting.
+  </Accordion>
+</AccordionGroup>
+
+### Post-Upgrade Reboot
+
+After setup completes, the system is rebooted to apply changes:
+
+```yaml /home/daytona/workspace/source/roles/fase_2/tasks/main.yml:79-94
+- name: 3.2 Reiniciar el servidor para completar la instalación de Windows 11
+  ansible.windows.win_reboot:
+    msg: "El servidor se reiniciará para completar la instalación de Windows 11"
+    reboot_timeout: 3600  # Ajuste a 1 hora para manejar reinicios prolongados
+  when: upd_w11.rc == 0
+
+- name: 3.3 Realizar una Pausa
+  ansible.builtin.pause:
+    seconds: 30
+
+- name: 3.4 Reiniciar PC
+  ansible.windows.win_reboot:
+
+- name: 3.5 Recoger Facts Windows 11
+  ansible.builtin.setup:
+  register: facts_w11
+```
+
+<Check>
+**Extended Timeout**: The reboot timeout is set to 1 hour (3600 seconds) to handle lengthy upgrade processes.
+</Check>
+
+## Registry-Based Method
+
+This method modifies Windows Update registry keys to force the system to pull Windows 11 via Windows Update.
+
+### Registry Key Backup
+
+Existing registry values are backed up before modification:
+
+```yaml /home/daytona/workspace/source/roles/fase_2/tasks/regedit_main.yml:24-49
+- name: 2.1 Guardar estado actual de TargetReleaseVersion
+  ansible.windows.win_shell: |
+    $key = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate'
+    $name = 'TargetReleaseVersion'
+    if (Test-Path "$key\$name") {
+      Get-ItemProperty -Path $key -Name $name | Select-Object -ExpandProperty $name
+    }
+  register: target_release_version
+
+- name: 2.2 Guardar estado actual de TargetReleaseVersionInfo
+  ansible.windows.win_shell: |
+    $key = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate'
+    $name = 'TargetReleaseVersionInfo'
+    if (Test-Path "$key\$name") {
+      Get-ItemProperty -Path $key -Name $name | Select-Object -ExpandProperty $name
+    }
+  register: target_release_version_info
+
+- name: 2.3 Verificar si la clave ProductVersion existe
+  ansible.windows.win_shell: |
+    $key = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate'
+    $name = 'ProductVersion'
+    if (Test-Path "$key\$name") {
+      Get-ItemProperty -Path $key -Name $name | Select-Object -ExpandProperty $name
+    }
+  register: product_version
+```
+
+### Registry Modifications
+
+Three key registry values are set to target Windows 11 23H2:
+
+```yaml /home/daytona/workspace/source/roles/fase_2/tasks/regedit_main.yml:51-70
+- name: 2.4 Configurar TargetProductVersion
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate
+    name: ProductVersion
+    data: "Windows 11"
+    type: string
+
+- name: 2.5 Configurar clave TargetReleaseVersionInfo para la versión de destino
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate
+    name: TargetReleaseVersionInfo
+    data: "23H2"
+    type: string
+
+- name: 2.6 Configurar clave TargetReleaseVersion para forzar la actualización a Windows 11
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate
+    name: TargetReleaseVersion
+    data: 1
+    type: dword
+```
+
+### Registry Keys Explained
+
+<Steps>
+  <Step title="ProductVersion">
+    Sets the target product to **"Windows 11"** (string value)
+  </Step>
+  <Step title="TargetReleaseVersionInfo">
+    Specifies the target version: **"23H2"** (version 23H2)
+  </Step>
+  <Step title="TargetReleaseVersion">
+    Enables version targeting: **1** (DWORD - enabled)
+  </Step>
+</Steps>
+
+**Registry Path**: `HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate`
+
+### Windows Update Process
+
+After registry modification, Windows Update is triggered:
+
+```yaml /home/daytona/workspace/source/roles/fase_2/tasks/regedit_main.yml:85-103
+- name: 3.2 Buscar actualizaciones manualmente
+  ansible.windows.win_updates:
+    category_names: "*"
+    state: searched
+  register: search_results
+
+- name: 3.3 Descargar actualizaciones
+  ansible.windows.win_updates:
+    category_names: "*"
+    state: downloaded
+  register: download_results
+  when: search_results.updates | length > 0
+
+- name: 3.4 Instalar actualizaciones
+  ansible.windows.win_updates:
+    category_names: "*"
+    state: installed
+  register: install_results
+  when: download_results.updates | length > 0
+```
+
+<Warning>
+This process can take **several hours** depending on network speed and system performance.
+</Warning>
+
+### Registry Restoration
+
+After upgrade, original registry values are restored:
+
+```yaml /home/daytona/workspace/source/roles/fase_2/tasks/regedit_main.yml:149-179
+- name: 4.1 Restaurar el valor original de ProductVersion
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate
+    name: ProductVersion
+    data: "{{ product_version.stdout }}"
+    type: string
+  when: product_version.stdout is defined
+
+- name: 4.2 Restaurar el valor original de TargetReleaseVersionInfo
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate
+    name: TargetReleaseVersionInfo
+    data: "{{ target_release_version_info.stdout }}"
+    type: string
+  when: target_release_version_info.stdout is defined
+
+- name: 4.3 Restaurar el valor original de TargetReleaseVersion
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate
+    name: TargetReleaseVersion
+    data: "{{ target_release_version.stdout }}"
+    type: dword
+  when: target_release_version.stdout is defined
+
+- name: 4.4 Eliminar la clave WindowsUpdate si no existía antes
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate
+    state: absent
+  when: product_version.stdout is not defined and target_release_version_info.stdout is not defined and target_release_version.stdout is not defined
+```
+
+<Check>
+**Best Practice**: The playbook restores original values or removes keys that didn't exist, maintaining system integrity.
+</Check>
+
+## Post-Upgrade Verification
+
+Both methods verify the upgrade by collecting system facts:
+
+```yaml /home/daytona/workspace/source/roles/fase_2/tasks/main.yml:96-111
+- name: 3.6 Datos de Sistema Operativo W11
+  ansible.builtin.debug:
+    msg:
+      - "Nombre de PC: {{ facts_w11.ansible_facts.ansible_hostname }}"
+      - "Version SO: {{ facts_w11.ansible_facts.ansible_distribution }}"
+      - "Arquitectura: {{ facts_w11.ansible_facts.ansible_architecture }}"
+
+- name: 3.7 Generar reporte de Actualizacion
+  ansible.builtin.copy:
+    content: |
+      Reporte de Actualizacion para: {{ facts_w11.ansible_facts.ansible_hostname }}
+      -----------------------------------------------
+      - Version SO: {{ facts_w11.ansible_facts.ansible_distribution }}
+      - Architecture: {{ facts_w11.ansible_facts.ansible_architecture }}
+    dest: roles/fase_2/files/{{ ansible_fqdn }}-upgrade_report.txt
+    mode: "0644"
+```
+
+**Report Location**: `roles/fase_2/files/<hostname>-upgrade_report.txt`
+
+## Choosing the Right Method
+
+<CardGroup cols={2}>
+  <Card title="Use ISO-Based When" icon="check">
+    - Migrating multiple systems
+    - Limited bandwidth available
+    - Need specific Windows 11 version
+    - Offline or air-gapped environment
+    - Faster migration required
+  </Card>
+  
+  <Card title="Use Registry-Based When" icon="check">
+    - Migrating individual systems
+    - Want latest Windows 11 updates
+    - Internet connectivity is reliable
+    - Storage space is limited
+    - Following Microsoft's update path
+  </Card>
+</CardGroup>
+
+## Switching Methods
+
+To switch between methods, modify the playbook task inclusion:
+
+```yaml
+# For ISO-based method
+- name: 2 - Proceso de Upgrade
+  ansible.builtin.include_role:
+    name: fase_2
+    tasks_from: main.yml  # Uses ISO method
+
+# For registry-based method (default)
+- name: 2 - Proceso de Upgrade
+  ansible.builtin.include_role:
+    name: fase_2
+    tasks_from: regedit_main.yml  # Uses registry method
+```
+
+<Info>
+Both methods include automatic Windows Update installation post-upgrade to ensure systems are fully patched.
+</Info>

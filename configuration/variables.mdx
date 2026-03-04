@@ -1,0 +1,223 @@
+---
+title: 'Role Variables'
+description: 'Configure variables for the migration phases'
+icon: 'sliders'
+---
+
+Each migration phase uses role variables to control behavior and specify paths. These variables are defined in the `defaults/main.yml` file within each role directory.
+
+## Overview
+
+The migration process is divided into two phases, each with its own configurable variables:
+
+- **Phase 1 (fase_1)**: Compatibility checking and preparation
+- **Phase 2 (fase_2)**: Migration execution and upgrade
+
+Both phases use similar directory configuration variables to manage where files are stored on the target Windows system.
+
+## Phase 1 Variables
+
+Phase 1 variables are defined in `roles/fase_1/defaults/main.yml`.
+
+<CodeGroup>
+```yaml roles/fase_1/defaults/main.yml
+---
+# defaults file for roles/fase_1
+fase_1_dir_whynotwin11: C:\temp\ansible
+```
+</CodeGroup>
+
+### fase_1_dir_whynotwin11
+
+<ParamField path="fase_1_dir_whynotwin11" type="string" default="C:\temp\ansible">
+  The directory on the Windows host where Phase 1 files will be stored.
+  
+  This directory is used to:
+  - Store the WhyNotWin11 compatibility checker tool
+  - Save compatibility check results
+  - Store temporary files needed during Phase 1
+  
+  **Default:** `C:\temp\ansible`
+</ParamField>
+
+<Info>
+  The directory will be automatically created if it doesn't exist. Ensure the user account has write permissions to create directories under `C:\temp`.
+</Info>
+
+## Phase 2 Variables
+
+Phase 2 variables are defined in `roles/fase_2/defaults/main.yml`.
+
+<CodeGroup>
+```yaml roles/fase_2/defaults/main.yml
+---
+# defaults file for roles/fase_2
+fase_2_dir_whynotwin11: C:\temp\ansible
+```
+</CodeGroup>
+
+### fase_2_dir_whynotwin11
+
+<ParamField path="fase_2_dir_whynotwin11" type="string" default="C:\temp\ansible">
+  The directory on the Windows host where Phase 2 files will be stored.
+  
+  This directory is used to:
+  - Store migration tools and scripts
+  - Save upgrade logs and results
+  - Store temporary files needed during Phase 2
+  
+  **Default:** `C:\temp\ansible`
+</ParamField>
+
+<Warning>
+  Both phases use the same default directory path. This allows Phase 2 to access files created during Phase 1. If you change this value, ensure consistency between phases.
+</Warning>
+
+## Variable Configuration
+
+### Using Default Values
+
+By default, you don't need to modify these variables. The roles will use the default values defined in `defaults/main.yml`.
+
+### Overriding Variables
+
+You can override these variables in multiple ways:
+
+<Tabs>
+  <Tab title="Playbook Variables">
+    Override variables directly in your playbook:
+    
+    ```yaml
+    - hosts: windows_sql
+      roles:
+        - role: fase_1
+          vars:
+            fase_1_dir_whynotwin11: C:\custom\path
+    ```
+  </Tab>
+  
+  <Tab title="Extra Variables">
+    Pass variables via command line:
+    
+    ```bash
+    ansible-playbook playbook.yml \
+      -e "fase_1_dir_whynotwin11=C:\custom\path"
+    ```
+  </Tab>
+  
+  <Tab title="Inventory Variables">
+    Define variables in the inventory file:
+    
+    ```ini
+    [windows_sql:vars]
+    fase_1_dir_whynotwin11=C:\custom\path
+    fase_2_dir_whynotwin11=C:\custom\path
+    ```
+  </Tab>
+  
+  <Tab title="Host Variables">
+    Create host-specific variable files:
+    
+    ```yaml host_vars/w10.yml
+    ---
+    fase_1_dir_whynotwin11: C:\custom\path
+    fase_2_dir_whynotwin11: C:\custom\path
+    ```
+  </Tab>
+</Tabs>
+
+## Directory Requirements
+
+<CardGroup cols={2}>
+  <Card title="Permissions" icon="lock">
+    The Ansible user must have write permissions to create and modify files in the specified directory.
+  </Card>
+  
+  <Card title="Disk Space" icon="hard-drive">
+    Ensure adequate disk space is available. The WhyNotWin11 tool and migration files require approximately 50-100 MB.
+  </Card>
+  
+  <Card title="Path Format" icon="folder-tree">
+    Use Windows path format with backslashes (`\`) or double backslashes (`\\`) in YAML.
+  </Card>
+  
+  <Card title="Persistence" icon="clock">
+    The directory persists between phases, allowing Phase 2 to access Phase 1 results.
+  </Card>
+</CardGroup>
+
+## Example Configurations
+
+### Standard Configuration
+
+Use the default directory for both phases:
+
+<CodeGroup>
+```yaml Playbook
+- hosts: windows_sql
+  roles:
+    - fase_1
+    - fase_2
+```
+</CodeGroup>
+
+Both phases will use `C:\temp\ansible` as configured in their defaults.
+
+### Custom Directory
+
+Use a custom directory for migration files:
+
+<CodeGroup>
+```yaml Playbook with Custom Path
+- hosts: windows_sql
+  vars:
+    custom_dir: C:\Migration\Win11Upgrade
+  roles:
+    - role: fase_1
+      vars:
+        fase_1_dir_whynotwin11: "{{ custom_dir }}"
+    - role: fase_2
+      vars:
+        fase_2_dir_whynotwin11: "{{ custom_dir }}"
+```
+</CodeGroup>
+
+### Per-Host Configuration
+
+Different directories for different hosts:
+
+<CodeGroup>
+```yaml host_vars/production-host.yml
+---
+fase_1_dir_whynotwin11: D:\Ansible\Migration
+fase_2_dir_whynotwin11: D:\Ansible\Migration
+```
+
+```yaml host_vars/test-host.yml
+---
+fase_1_dir_whynotwin11: C:\temp\test
+fase_2_dir_whynotwin11: C:\temp\test
+```
+</CodeGroup>
+
+<Tip>
+  Keep the directory paths consistent between Phase 1 and Phase 2 to ensure compatibility check results are available during the upgrade process.
+</Tip>
+
+## Variable Precedence
+
+Ansible applies variables in the following order (highest to lowest priority):
+
+1. Extra variables (`-e` on command line)
+2. Task variables
+3. Block variables
+4. Role and include variables
+5. Play variables
+6. Host facts and cached set_facts
+7. Host variables (inventory and host_vars)
+8. Group variables (inventory and group_vars)
+9. Role defaults (defined in `defaults/main.yml`)
+
+<Info>
+  The variables defined in `defaults/main.yml` have the lowest priority and can be easily overridden by any other method.
+</Info>

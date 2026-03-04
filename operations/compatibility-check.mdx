@@ -1,0 +1,246 @@
+---
+title: "Compatibility Check"
+description: "Hardware and software validation for Windows 11 migration"
+icon: "shield-check"
+---
+
+## Overview
+
+The compatibility check is the first critical phase of the Windows 10 to 11 migration process. It validates that target systems meet all hardware and software requirements for Windows 11 using the **WhyNotWin11** tool.
+
+<Note>
+This validation runs automatically before any migration attempt and generates detailed compatibility reports for each system.
+</Note>
+
+## WhyNotWin11 Tool
+
+The migration tool uses [WhyNotWin11](https://github.com/rcmaehl/WhyNotWin11), an open-source utility that checks all Windows 11 system requirements.
+
+### Tool Deployment
+
+The tool is automatically deployed to target systems:
+
+```yaml /home/daytona/workspace/source/roles/fase_1/tasks/main.yml:40-61
+- name: 2.1 Crear Directorio de 'WhyNotWin11' (si no existe)
+  ansible.windows.win_file:
+    path: "{{ fase_1_dir_whynotwin11 }}"
+    state: directory
+
+- name: 2.2 Validar existencia de Directorio 'WhyNotWin11'
+  ansible.windows.win_stat:
+    path: "{{ fase_1_dir_whynotwin11 }}"
+  register: why_dir_out
+
+- name: 2.3 Copiar 'WhyNotWin11' a Directorio
+  ansible.windows.win_copy:
+    src: roles/fase_1/files/WhyNotWin11.exe
+    dest: "{{ fase_1_dir_whynotwin11 }}/WhyNotWin11.exe"
+    remote_src: false
+  when: why_dir_out.stat.exists
+
+- name: 2.4 Verificar que 'WhyNotWin11' este presente
+  ansible.windows.win_stat:
+    path: "{{ fase_1_dir_whynotwin11 }}/WhyNotWin11.exe"
+  register: whynoywin11_stat
+```
+
+<Info>
+**Default Installation Path**: `C:\temp\ansible\WhyNotWin11.exe`
+</Info>
+
+### Execution
+
+The tool runs in silent mode and exports results to CSV format:
+
+```yaml /home/daytona/workspace/source/roles/fase_1/tasks/main.yml:79-85
+- name: 2.7 Ejecutar 'WhyNotWin11' (silencioso) y Generar Archivo CSV
+  ansible.windows.win_shell: |
+    {{ fase_1_dir_whynotwin11 }}/WhyNotWin11.exe /e CSV {{ fase_1_dir_whynotwin11 }}/Salida_Compatibilidad.csv /s
+  args:
+    executable: powershell.exe
+  register: whynotwin11_output
+  when: whynoywin11_stat.stat.exists
+```
+
+**Command Arguments:**
+- `/e CSV` - Export format (CSV)
+- `/s` - Silent mode (no GUI)
+- Output file: `Salida_Compatibilidad.csv`
+
+## Windows 11 Compatibility Checks
+
+WhyNotWin11 validates **11 critical requirements** for Windows 11 compatibility:
+
+<CardGroup cols={2}>
+  <Card title="Architecture" icon="microchip">
+    **Required**: 64-bit CPU and 64-bit OS
+  </Card>
+  <Card title="Boot Method" icon="boot">
+    **Required**: UEFI (not Legacy BIOS)
+  </Card>
+  <Card title="CPU Compatibility" icon="cpu">
+    **Required**: Intel Core 8th Gen+ or AMD Ryzen 2000+
+  </Card>
+  <Card title="CPU Core Count" icon="grid">
+    **Required**: 2 or more cores
+  </Card>
+  <Card title="CPU Frequency" icon="gauge">
+    **Required**: 1 GHz or higher
+  </Card>
+  <Card title="DirectX + WDDM2" icon="display">
+    **Required**: DirectX 12+ with WDDM 2.x driver
+  </Card>
+  <Card title="Disk Partition" icon="hard-drive">
+    **Required**: GPT partition scheme (not MBR)
+  </Card>
+  <Card title="RAM" icon="memory">
+    **Required**: 4 GB or more
+  </Card>
+  <Card title="Secure Boot" icon="lock">
+    **Required**: Enabled in firmware
+  </Card>
+  <Card title="Storage" icon="database">
+    **Required**: 64 GB or more on C: drive
+  </Card>
+  <Card title="TPM Version" icon="shield">
+    **Required**: TPM 2.0 enabled
+  </Card>
+</CardGroup>
+
+## CSV Parsing and Fact Setting
+
+The playbook parses the CSV output and sets Ansible facts for each requirement:
+
+```yaml /home/daytona/workspace/source/roles/fase_1/tasks/main.yml:87-106
+- name: 2.8 Leer el Archivo CSV
+  ansible.windows.win_shell: |
+    Get-Content {{ fase_1_dir_whynotwin11 }}/Salida_Compatibilidad.csv
+  changed_when: false
+  register: csv_content
+
+- name: 2.9 Analizar la Compatibilidad del PC
+  ansible.builtin.set_fact:
+    architecture: "{{ csv_content.stdout_lines[1].split(',')[1] }}"
+    boot_method: "{{ csv_content.stdout_lines[1].split(',')[2] }}"
+    cpu_compatibility: "{{ csv_content.stdout_lines[1].split(',')[3] }}"
+    cpu_core_count: "{{ csv_content.stdout_lines[1].split(',')[4] }}"
+    cpu_frequency: "{{ csv_content.stdout_lines[1].split(',')[5] }}"
+    directx_wddm2: "{{ csv_content.stdout_lines[1].split(',')[6] }}"
+    disk_partition_type: "{{ csv_content.stdout_lines[1].split(',')[7] }}"
+    ram_installed: "{{ csv_content.stdout_lines[1].split(',')[8] }}"
+    secure_boot: "{{ csv_content.stdout_lines[1].split(',')[9] }}"
+    storage_available: "{{ csv_content.stdout_lines[1].split(',')[10] }}"
+    tmp_version: "{{ csv_content.stdout_lines[1].split(',')[11] }}"
+  when: csv_content.stdout_lines | length > 1
+```
+
+<Warning>
+Each fact is set to `"True"` or `"False"` as a string, not a boolean value.
+</Warning>
+
+## Compatibility Validation
+
+The system is marked as compatible only if **all 11 checks pass**:
+
+```yaml /home/daytona/workspace/source/roles/fase_1/tasks/main.yml:123-141
+- name: 2.11 Valor Booleano de compatible
+  ansible.builtin.set_fact:
+    compatible: false
+
+- name: 2.12 Validar si el PC es Compatible con Windows 11
+  ansible.builtin.set_fact:
+    compatible: true
+  when:
+    - architecture == 'True'
+    - boot_method == 'True'
+    - cpu_compatibility == 'True'
+    - cpu_core_count == 'True'
+    - cpu_frequency == 'True'
+    - directx_wddm2 == 'True'
+    - disk_partition_type == 'True'
+    - ram_installed == 'True'
+    - secure_boot == 'True'
+    - storage_available == 'True'
+    - tpm_version == 'True'
+```
+
+## Compatibility Report Generation
+
+A detailed text report is generated for each system and saved to the Ansible controller:
+
+```yaml /home/daytona/workspace/source/roles/fase_1/tasks/main.yml:169-186
+- name: 2.14 Generar reporte de compatibilidad
+  ansible.builtin.copy:
+    content: |
+      Reporte de Compatibilidad para: {{ ansible_fqdn }}
+      -----------------------------------------------
+      - Architecture: {{ architecture }}
+      - Boot Method: {{ boot_method }}
+      - CPU Compatibility: {{ cpu_compatibility }}
+      - CPU Core Count: {{ cpu_core_count }}
+      - CPU Frequency: {{ cpu_frequency }}
+      - DirectX + WDDM2: {{ directx_wddm2 }}
+      - Disk Partition: {{ disk_partition_type }}
+      - Ram Installed: {{ ram_installed }}
+      - Secure Boot: {{ secure_boot }}
+      - Storage Available: {{ storage_available }}
+      - TPM Version: {{ tmp_version }}
+    dest: roles/fase_1/files/{{ ansible_fqdn }}-compatibility_report.txt
+    mode: "0644"
+```
+
+**Report Location**: `roles/fase_1/files/<hostname>-compatibility_report.txt`
+
+## Debug Output
+
+During execution, all compatibility results are displayed with their requirements:
+
+```yaml /home/daytona/workspace/source/roles/fase_1/tasks/main.yml:108-121
+- name: 2.10 <DEBUG> - Compatibilidad del PC
+  ansible.builtin.debug:
+    msg:
+      - "Architecture: {{ architecture }} | Necesario: 64 Bit CPU, 64 Bit OS"
+      - "Boot Method: {{ boot_method }} | Necesario: UEFI"
+      - "CPU Compatibility: {{ cpu_compatibility }} | Necesario: IntelCore (i3, i5, i7, i9) 8va Gen ò AMD Ryzen (3, 5, 7, 9 o Threadripper > 2000)"
+      - "CPU Core Count: {{ cpu_core_count }} | Necesario: 2 o +"
+      - "CPU Frequency: {{ cpu_frequency }} | Necesario: 1 Ghz o +"
+      - "DirectX + WDDM2: {{ directx_wddm2 }} | Necesario: DirectX 12 o + & WDDM2 2.x"
+      - "Disk Partition: {{ disk_partition_type }} | Necesario: GPT"
+      - "Ram Installed {{ ram_installed }} | Necesario: 4 GB o +"
+      - "Secure Boot: {{ secure_boot }} | Necesario: (Habilitado)"
+      - "Storage Available: {{ storage_available }} | Necesario: 64 GB o + [C:]"
+      - "TMP Version: {{ tmp_version }} | Necesario: 2.0 (Habilitado)"
+```
+
+## Error Handling
+
+Compatibility check failures are gracefully handled:
+
+```yaml /home/daytona/workspace/source/roles/fase_1/tasks/main.yml:143-152
+rescue:
+  - name: <ERROR> - 2.1 Verificar la Compatibilidad de Hardware con 'WhyNotWin11'
+    ansible.builtin.debug:
+      msg: "Error en Proceso de Verificar la Compatibilidad de Hardware con 'WhyNotWin11'"
+
+  - name: Eliminando 'Salida_Compatibilidad.csv'
+    ansible.windows.win_file:
+      path: "{{ fase_1_dir_whynotwin11 }}/Salida_Compatibilidad.csv"
+      state: absent
+    when: compt_out.stat.exists
+```
+
+<Check>
+**Best Practice**: The CSV file is automatically cleaned up on error to prevent stale data from affecting subsequent runs.
+</Check>
+
+## Next Steps
+
+After compatibility validation:
+
+1. **If compatible**: Proceed to [restore point creation](/operations/troubleshooting#restore-points) and [upgrade methods](/operations/upgrade-methods)
+2. **If incompatible**: Review the compatibility report to identify which requirements failed
+3. **System remediation**: Address hardware/firmware issues (enable TPM, Secure Boot, convert to GPT, etc.)
+
+<Info>
+Systems that fail compatibility checks will not proceed to the upgrade phase automatically.
+</Info>

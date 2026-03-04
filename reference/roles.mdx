@@ -1,0 +1,446 @@
+---
+title: Ansible Roles
+description: Detailed documentation of fase_1 and fase_2 roles for Windows 10 to 11 migration
+---
+
+## Overview
+
+The migration playbook uses two Ansible roles to separate pre-upgrade validation from the actual upgrade process.
+
+## Directory Structure
+
+```plaintext
+roles/
+├── fase_1/                    # Pre-upgrade validation
+│   ├── defaults/
+│   │   └── main.yml          # Default variables
+│   ├── files/
+│   │   └── WhyNotWin11.exe   # Compatibility checker tool
+│   ├── tasks/
+│   │   └── main.yml          # Validation tasks
+│   └── README.md
+└── fase_2/                    # Windows 11 upgrade
+    ├── defaults/
+    │   └── main.yml          # Default variables
+    ├── files/
+    │   └── WinRM.ps1         # WinRM restoration script
+    ├── tasks/
+    │   ├── main.yml          # ISO-based upgrade (alternative)
+    │   └── regedit_main.yml  # Registry-based upgrade (default)
+    └── README.md
+```
+
+## FASE 1: Pre-Upgrade Validation
+
+### Purpose
+
+Validates system compatibility with Windows 11 requirements and prepares the environment for upgrade.
+
+### Default Variables
+
+**Source:** `~/workspace/source/roles/fase_1/defaults/main.yml`
+
+<ParamField path="fase_1_dir_whynotwin11" type="string" default="C:\temp\ansible">
+  Working directory for WhyNotWin11 tool and compatibility reports
+</ParamField>
+
+### Task Blocks
+
+The role executes four main task blocks:
+
+#### 1. System Information Collection
+
+**Lines:** `~/workspace/source/roles/fase_1/tasks/main.yml:3-35`
+
+<Steps>
+  <Step title="Validate OS">
+    Asserts that the system is running Windows 10 Pro using `ansible.builtin.assert`
+  </Step>
+  <Step title="Error Handling">
+    If validation fails, logs the incompatible host to `roles/fase_1/files/not_compliant_hosts.log` and fails gracefully
+  </Step>
+  <Step title="Debug Output">
+    Always runs to log completion status for the target host
+  </Step>
+</Steps>
+
+```yaml
+- name: 1.1 Validacion de Sistema Operativo
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == "Microsoft Windows 10 Pro"
+    success_msg: "El Sistema Operativo SI es Windows 10 Pro"
+    fail_msg: "El Sistema Operativo NO es Windows 10 Pro"
+```
+
+#### 2. Hardware Compatibility Verification
+
+**Lines:** `~/workspace/source/roles/fase_1/tasks/main.yml:37-187`
+
+This is the most critical block - it uses the WhyNotWin11 tool to check all Windows 11 hardware requirements.
+
+<AccordionGroup>
+  <Accordion title="2.1-2.3: WhyNotWin11 Setup">
+    - Creates directory `C:\temp\ansible`
+    - Validates directory creation
+    - Copies WhyNotWin11.exe from `roles/fase_1/files/`
+  </Accordion>
+
+  <Accordion title="2.4-2.7: Execute Compatibility Check">
+    - Checks if old CSV report exists and removes it
+    - Runs WhyNotWin11 in silent mode: `/e CSV /s`
+    - Generates `Salida_Compatibilidad.csv` with compatibility results
+  </Accordion>
+
+  <Accordion title="2.8-2.9: Parse Results">
+    - Reads CSV file with `Get-Content`
+    - Parses 11 compatibility checks from CSV into Ansible facts
+    - Sets individual variables for each requirement
+  </Accordion>
+
+  <Accordion title="2.10: Debug Output">
+    Displays all 11 requirements with expected values:
+    - Architecture: 64 Bit CPU, 64 Bit OS
+    - Boot Method: UEFI
+    - CPU Compatibility: Intel Core 8th Gen+ or AMD Ryzen 2000+
+    - CPU Core Count: 2 or more
+    - CPU Frequency: 1 GHz or more
+    - DirectX + WDDM2: DirectX 12+ & WDDM2 2.x
+    - Disk Partition: GPT
+    - RAM Installed: 4 GB or more
+    - Secure Boot: Enabled
+    - Storage Available: 64 GB or more
+    - TPM Version: 2.0 (Enabled)
+  </Accordion>
+
+  <Accordion title="2.11-2.12: Set Compatible Boolean">
+    - Initially sets `compatible: false`
+    - Sets `compatible: true` only if ALL 11 checks return 'True'
+  </Accordion>
+
+  <Accordion title="2.13-2.14: Generate Report">
+    - Delegates to localhost (Ansible controller)
+    - Creates compatibility report in `roles/fase_1/files/`
+    - Report includes all 11 requirement values
+  </Accordion>
+</AccordionGroup>
+
+**See:** [Compatibility Requirements](/reference/compatibility-requirements) for the full requirements table
+
+#### 3. Create Restore Point
+
+**Lines:** `~/workspace/source/roles/fase_1/tasks/main.yml:188-218`
+
+<Warning>
+  Only runs when `not compatible` is true (should be `compatible` in production)
+</Warning>
+
+<Steps>
+  <Step title="Check Restore Points">
+    Uses `Get-ComputerRestorePoint` to check if system protection is enabled
+  </Step>
+  <Step title="Enable Protection">
+    Runs `Enable-ComputerRestore -Drive C:` if no restore points exist
+  </Step>
+  <Step title="Create Checkpoint">
+    Creates restore point with description "Pre-Windows11-Migration" using `Checkpoint-Computer`
+  </Step>
+</Steps>
+
+#### 4. Windows Updates and Patches
+
+**Lines:** `~/workspace/source/roles/fase_1/tasks/main.yml:220-237`
+
+<Warning>
+  Only runs when `not compatible` is true (should be `compatible` in production)
+</Warning>
+
+```yaml
+- name: 4.2 Aplicar parches de ser Necesario
+  ansible.windows.win_updates:
+    category_names: "*"
+    reboot: true
+  register: update_results
+  retries: 3
+  delay: 120
+  until: update_results.failed_update_count == 0
+```
+
+- Checks for pending reboots with `ansible_reboot_pending`
+- Applies all available Windows updates
+- Retries up to 3 times with 120-second delays
+- Automatically reboots if needed
+
+## FASE 2: Windows 11 Upgrade
+
+### Purpose
+
+Performs the actual Windows 10 to 11 upgrade using either registry-based Windows Update or ISO installation.
+
+### Default Variables
+
+**Source:** `~/workspace/source/roles/fase_2/defaults/main.yml`
+
+<ParamField path="fase_2_dir_whynotwin11" type="string" default="C:\temp\ansible">
+  Working directory for upgrade files and scripts
+</ParamField>
+
+### Upgrade Methods
+
+FASE 2 provides two different upgrade approaches:
+
+<CodeGroup>
+```yaml main.yml
+# ISO-based upgrade (not used by default)
+ansible.builtin.include_role:
+  name: fase_2
+  # Uses tasks/main.yml automatically
+```
+
+```yaml regedit_main.yml
+# Registry-based upgrade (default method)
+ansible.builtin.include_role:
+  name: fase_2
+  tasks_from: regedit_main.yml
+```
+</CodeGroup>
+
+### Task File: regedit_main.yml (Default)
+
+**Source:** `~/workspace/source/roles/fase_2/tasks/regedit_main.yml`
+
+This is the default upgrade method that uses Windows registry modifications to trigger Windows Update.
+
+#### Block 1: Configure WinRM
+
+**Lines:** `~/workspace/source/roles/fase_2/tasks/regedit_main.yml:3-20`
+
+<Steps>
+  <Step title="Create PS Directory">
+    Creates `C:\temp\ansible\PS` directory
+  </Step>
+  <Step title="Copy WinRM Script">
+    Copies `WinRM.ps1` from `roles/fase_2/files/` to the PS directory
+  </Step>
+</Steps>
+
+<Info>
+  This script will be executed by the scheduled task (created in pre_tasks) after system reboots to restore WinRM connectivity.
+</Info>
+
+#### Block 2: Registry Modifications
+
+**Lines:** `~/workspace/source/roles/fase_2/tasks/regedit_main.yml:22-75`
+
+Modifies Windows registry to force Windows 11 upgrade via Windows Update.
+
+<AccordionGroup>
+  <Accordion title="2.1-2.3: Backup Current Registry Values">
+    Saves existing registry values before modification:
+    - `TargetReleaseVersion` (DWORD)
+    - `TargetReleaseVersionInfo` (String)
+    - `ProductVersion` (String)
+  </Accordion>
+
+  <Accordion title="2.4-2.6: Set Windows 11 Target">
+    Configures registry keys at `HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate`:
+    
+    | Key | Type | Value | Purpose |
+    |-----|------|-------|----------|
+    | ProductVersion | string | "Windows 11" | Target product |
+    | TargetReleaseVersionInfo | string | "23H2" | Specific version |
+    | TargetReleaseVersion | dword | 1 | Enable targeting |
+  </Accordion>
+
+  <Accordion title="2.7: Reboot">
+    Reboots the system to apply registry changes with 600-second timeout
+  </Accordion>
+</AccordionGroup>
+
+#### Block 3: Install Updates
+
+**Lines:** `~/workspace/source/roles/fase_2/tasks/regedit_main.yml:77-147`
+
+<Steps>
+  <Step title="Pause 30 Seconds">
+    Allows system to stabilize after reboot
+  </Step>
+  <Step title="Search Updates">
+    Searches for available updates with `state: searched`
+  </Step>
+  <Step title="Download Updates">
+    Downloads updates if any are found with `state: downloaded`
+  </Step>
+  <Step title="Install Updates">
+    Installs downloaded updates with `state: installed`
+  </Step>
+  <Step title="Reboot and Complete">
+    Reboots if required with 3600-second timeout
+  </Step>
+  <Step title="Install Remaining">
+    Runs final update pass with retries until `failed_update_count == 0`
+  </Step>
+  <Step title="Gather Facts">
+    Collects new system facts to verify Windows 11 installation
+  </Step>
+  <Step title="Generate Report">
+    Creates upgrade report in `roles/fase_2/files/` with OS version and architecture
+  </Step>
+</Steps>
+
+<Note>
+  The role uses custom SSH args: `-o ControlMaster=no -o ServerAliveInterval=30` to maintain connectivity during long-running updates.
+</Note>
+
+#### Block 4: Restore Registry
+
+**Lines:** `~/workspace/source/roles/fase_2/tasks/regedit_main.yml:149-180`
+
+Restores original registry values or removes keys if they didn't exist before.
+
+```yaml
+- name: 4.1 Restaurar el valor original de ProductVersion
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate
+    name: ProductVersion
+    data: "{{ product_version.stdout }}"
+    type: string
+  when: product_version.stdout is defined
+```
+
+- Restores `ProductVersion` if it existed
+- Restores `TargetReleaseVersionInfo` if it existed
+- Restores `TargetReleaseVersion` if it existed
+- Removes entire `WindowsUpdate` key if none of the values existed before
+
+### Task File: main.yml (Alternative)
+
+**Source:** `~/workspace/source/roles/fase_2/tasks/main.yml`
+
+This alternative upgrade method uses a Windows 11 ISO file.
+
+#### Block 1: Configure WinRM
+
+**Lines:** `~/workspace/source/roles/fase_2/tasks/main.yml:3-20`
+
+Identical to regedit_main.yml - sets up WinRM script.
+
+#### Block 2: ISO Preparation
+
+**Lines:** `~/workspace/source/roles/fase_2/tasks/main.yml:22-66`
+
+<Steps>
+  <Step title="Create ISO Directory">
+    Creates `C:\temp\ansible\ISO` directory
+  </Step>
+  <Step title="Copy ISO File">
+    Copies `Win11_23H2_Spanish_Mexico_x64v2.iso` from `roles/fase_2/files/`
+  </Step>
+  <Step title="Mount ISO">
+    Mounts the ISO using `Mount-DiskImage`
+  </Step>
+  <Step title="Get Drive Letter">
+    Retrieves the mounted drive letter by searching for volume label "CCCOMA_X64FRE_ES-MX_DV9"
+  </Step>
+</Steps>
+
+<Note>
+  The ISO file must be placed in `roles/fase_2/files/` before running. Commented code shows an alternative download method.
+</Note>
+
+#### Block 3: ISO-Based Upgrade
+
+**Lines:** `~/workspace/source/roles/fase_2/tasks/main.yml:68-120`
+
+```yaml
+- name: 3.1 Ejecutar el instalador de Windows 11 desde la ISO montada
+  ansible.windows.win_shell: >
+    Start-Process -FilePath "{{ iso_mount.stdout | trim }}:\setup.exe" -ArgumentList
+    '/auto upgrade', '/quiet', '/eula accept', '/showoobe none', '/priority normal', '/noreboot',
+    '/compat ignorewarning', '/migratedrivers all', '/copylogs C:\temp\ansible' -Wait
+```
+
+##### Setup.exe Arguments
+
+| Argument | Purpose |
+|----------|----------|
+| `/auto upgrade` | Automated upgrade process |
+| `/quiet` | Silent installation without user interaction |
+| `/eula accept` | Automatically accept license agreement |
+| `/showoobe none` | Skip Out-of-Box Experience |
+| `/priority normal` | Standard process priority |
+| `/noreboot` | Prevent automatic reboot |
+| `/compat ignorewarning` | Bypass compatibility warnings |
+| `/migratedrivers all` | Migrate all drivers from Windows 10 |
+| `/copylogs C:\temp\ansible` | Save installation logs |
+
+<Steps>
+  <Step title="Run Setup">
+    Executes setup.exe with upgrade arguments and waits for completion
+  </Step>
+  <Step title="Reboot">
+    Reboots system with 3600-second timeout when setup completes successfully
+  </Step>
+  <Step title="Pause">
+    30-second pause after reboot
+  </Step>
+  <Step title="Second Reboot">
+    Additional reboot to ensure all changes are applied
+  </Step>
+  <Step title="Gather Facts">
+    Collects system information to verify Windows 11
+  </Step>
+  <Step title="Generate Report">
+    Creates upgrade report with hostname, distribution, and architecture
+  </Step>
+  <Step title="Final Updates">
+    Installs all pending Windows 11 updates with automatic reboot
+  </Step>
+</Steps>
+
+## Difference Between main.yml and regedit_main.yml
+
+<CardGroup cols={2}>
+  <Card title="regedit_main.yml" icon="windows">
+    **Registry-based Windows Update**
+    
+    - Modifies registry to target Windows 11 23H2
+    - Uses Windows Update mechanism
+    - No ISO file required
+    - Smaller network footprint
+    - **Default method** used by playbook
+  </Card>
+  
+  <Card title="main.yml" icon="compact-disc">
+    **ISO-based Installation**
+    
+    - Requires 5+ GB ISO file
+    - Direct setup.exe execution
+    - More control over upgrade process
+    - Offline-capable (if ISO pre-staged)
+    - Alternative method (not used by default)
+  </Card>
+</CardGroup>
+
+### When to Use Each Method
+
+<AccordionGroup>
+  <Accordion title="Use regedit_main.yml (Registry) When:">
+    - Systems have reliable internet connectivity
+    - You want to minimize file transfers
+    - You prefer Microsoft's official Windows Update channel
+    - You need to upgrade multiple systems efficiently
+  </Accordion>
+
+  <Accordion title="Use main.yml (ISO) When:">
+    - Internet connectivity is limited or unreliable
+    - You need a specific Windows 11 build
+    - You want full control over installation parameters
+    - You're upgrading systems in an isolated network
+  </Accordion>
+</AccordionGroup>
+
+## See Also
+
+- [Playbook Structure](/reference/playbook-structure) - Main playbook organization
+- [Compatibility Requirements](/reference/compatibility-requirements) - Windows 11 hardware validation details

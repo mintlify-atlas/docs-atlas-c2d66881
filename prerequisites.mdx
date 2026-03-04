@@ -1,0 +1,291 @@
+---
+title: Prerequisites
+description: Requirements for Ansible control node and Windows 10 target systems
+---
+
+## Overview
+
+Before running the Windows 10 to 11 migration tool, ensure your environment meets all prerequisites for both the Ansible control node and target Windows systems.
+
+## Ansible Control Node Requirements
+
+<AccordionGroup>
+  <Accordion icon="linux" title="Operating System" defaultOpen>
+    The Ansible control node must run a Unix-like operating system:
+    
+    - Linux (any modern distribution)
+    - macOS
+    - WSL2 on Windows
+    
+    <Note>
+      Ansible **cannot** run natively on Windows as a control node.
+    </Note>
+  </Accordion>
+  
+  <Accordion icon="cube" title="Ansible Installation">
+    Install Ansible 2.9 or later:
+    
+    <CodeGroup>
+    ```bash Ubuntu/Debian
+    sudo apt update
+    sudo apt install ansible
+    ```
+    
+    ```bash RHEL/CentOS
+    sudo yum install ansible
+    ```
+    
+    ```bash macOS
+    brew install ansible
+    ```
+    
+    ```bash pip
+    pip install ansible
+    ```
+    </CodeGroup>
+    
+    Verify installation:
+    ```bash
+    ansible --version
+    ```
+  </Accordion>
+  
+  <Accordion icon="puzzle-piece" title="Required Ansible Collections">
+    Install the required collections from `requirements.yml`:
+    
+    ```yaml requirements.yml
+    ---
+    collections:
+      - name: community.windows
+    ```
+    
+    Install using:
+    ```bash
+    ansible-galaxy collection install -r requirements.yml
+    ```
+    
+    <Info>
+      The `community.windows` collection provides modules for Windows management including WinRM, registry editing, file operations, and Windows Update management.
+    </Info>
+  </Accordion>
+  
+  <Accordion icon="network-wired" title="Network Connectivity">
+    - Network access to target Windows machines
+    - WinRM ports accessible (default: 5985 for HTTP, 5986 for HTTPS)
+    - No restrictive firewalls blocking WinRM traffic
+  </Accordion>
+</AccordionGroup>
+
+## Windows 10 Target System Requirements
+
+<AccordionGroup>
+  <Accordion icon="windows" title="Operating System" defaultOpen>
+    <Card>
+      **Required:** Windows 10 Pro
+    </Card>
+    
+    <Warning>
+      The playbook specifically validates for **Windows 10 Pro**. Other editions (Home, Enterprise, Education) are not supported by this automation.
+    </Warning>
+    
+    The tool verifies this requirement in Phase 1:
+    ```yaml
+    - name: 1.1 Validacion de Sistema Operativo
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution == "Microsoft Windows 10 Pro"
+        success_msg: "El Sistema Operativo SI es Windows 10 Pro"
+        fail_msg: "El Sistema Operativo NO es Windows 10 Pro"
+    ```
+  </Accordion>
+  
+  <Accordion icon="gear" title="WinRM Configuration">
+    Windows Remote Management (WinRM) must be configured on target systems.
+    
+    ### Quick WinRM Setup
+    
+    Run this PowerShell command on the Windows 10 target as Administrator:
+    
+    ```powershell
+    # Enable WinRM
+    Enable-PSRemoting -Force
+    
+    # Configure WinRM for Ansible
+    Set-Item -Path WSMan:\localhost\Service\Auth\Basic -Value $true
+    Set-Item -Path WSMan:\localhost\Service\AllowUnencrypted -Value $true
+    
+    # Configure firewall
+    New-NetFirewallRule -Name "WinRM-HTTP" -DisplayName "WinRM HTTP" -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 5985
+    ```
+    
+    <Tip>
+      For production environments, use HTTPS (port 5986) with certificate-based authentication instead of basic auth over HTTP.
+    </Tip>
+    
+    ### Expected WinRM Configuration
+    
+    The inventory file uses these WinRM settings:
+    ```ini maquinas
+    [windows_sql:vars]
+    ansible_user = ansible
+    ansible_password = ansible123
+    ansible_port = 5986
+    ansible_connection = winrm
+    ansible_winrm_transport = ntlm
+    ansible_winrm_server_cert_validation = ignore
+    ```
+    
+    <Warning>
+      Using `ansible_winrm_server_cert_validation = ignore` is acceptable for testing but should be replaced with proper certificate validation in production.
+    </Warning>
+  </Accordion>
+  
+  <Accordion icon="user-shield" title="User Permissions">
+    The Ansible user account must have:
+    
+    - **Administrator privileges** on the target system
+    - **Remote management permissions**
+    - Ability to:
+      - Install software
+      - Modify registry
+      - Create scheduled tasks
+      - Reboot the system
+      - Mount disk images
+  </Accordion>
+</AccordionGroup>
+
+## Hardware Compatibility Requirements for Windows 11
+
+<Note>
+  The tool automatically validates all hardware requirements in Phase 1 using WhyNotWin11.
+</Note>
+
+Your Windows 10 system must meet these specifications:
+
+<CardGroup cols={2}>
+  <Card title="Processor" icon="microchip">
+    - **Intel:** 8th Gen Core (i3/i5/i7/i9) or newer
+    - **AMD:** Ryzen 3/5/7/9 2000 series or Threadripper 2000+ or newer
+    - **Speed:** 1 GHz or faster
+    - **Cores:** 2 or more
+  </Card>
+  
+  <Card title="Memory" icon="memory">
+    - **Minimum:** 4 GB RAM
+    - **Recommended:** 8 GB or more
+  </Card>
+  
+  <Card title="Storage" icon="hard-drive">
+    - **Available space:** 64 GB or more
+    - **Type:** SSD recommended for best performance
+  </Card>
+  
+  <Card title="Firmware" icon="chip">
+    - **UEFI** firmware (not legacy BIOS)
+    - **Secure Boot** capable and enabled
+  </Card>
+  
+  <Card title="TPM" icon="lock">
+    - **TPM 2.0** enabled in BIOS/UEFI
+    - Critical requirement for Windows 11
+  </Card>
+  
+  <Card title="Display & Graphics" icon="display">
+    - **DirectX 12** compatible graphics
+    - **WDDM 2.0** driver or later
+    - HD display (720p) or higher
+  </Card>
+  
+  <Card title="Partition Style" icon="table-list">
+    - **GPT** (GUID Partition Table)
+    - Not MBR (Master Boot Record)
+  </Card>
+  
+  <Card title="Architecture" icon="microchip">
+    - **64-bit** CPU and OS
+    - 32-bit systems not supported
+  </Card>
+</CardGroup>
+
+### Automated Compatibility Check
+
+The tool validates all these requirements automatically:
+
+```yaml
+- name: 2.9 Analizar la Compatibilidad del PC
+  ansible.builtin.set_fact:
+    architecture: "{{ csv_content.stdout_lines[1].split(',')[1] }}"
+    boot_method: "{{ csv_content.stdout_lines[1].split(',')[2] }}"
+    cpu_compatibility: "{{ csv_content.stdout_lines[1].split(',')[3] }}"
+    cpu_core_count: "{{ csv_content.stdout_lines[1].split(',')[4] }}"
+    cpu_frequency: "{{ csv_content.stdout_lines[1].split(',')[5] }}"
+    directx_wddm2: "{{ csv_content.stdout_lines[1].split(',')[6] }}"
+    disk_partition_type: "{{ csv_content.stdout_lines[1].split(',')[7] }}"
+    ram_installed: "{{ csv_content.stdout_lines[1].split(',')[8] }}"
+    secure_boot: "{{ csv_content.stdout_lines[1].split(',')[9] }}"
+    storage_available: "{{ csv_content.stdout_lines[1].split(',')[10] }}"
+    tpm_version: "{{ csv_content.stdout_lines[1].split(',')[11] }}"
+```
+
+A compatibility report is generated for each system at:
+```
+roles/fase_1/files/<hostname>-compatibility_report.txt
+```
+
+## Software Requirements
+
+<Steps>
+  <Step title="Python on Windows Targets">
+    While not explicitly required (WinRM doesn't need Python), having Python 3.x installed can help with debugging.
+  </Step>
+  
+  <Step title="PowerShell 5.1 or Later">
+    Modern Windows 10 systems include this by default. Verify with:
+    ```powershell
+    $PSVersionTable.PSVersion
+    ```
+  </Step>
+  
+  <Step title="Windows 11 ISO">
+    Place the Windows 11 installation ISO at:
+    ```
+    roles/fase_2/files/Win11_23H2_Spanish_Mexico_x64v2.iso
+    ```
+    
+    <Info>
+      The playbook expects the Spanish (Mexico) version. Modify the ISO filename in `roles/fase_2/tasks/main.yml` for other language versions.
+    </Info>
+  </Step>
+  
+  <Step title="WhyNotWin11 Executable">
+    Place the compatibility checker at:
+    ```
+    roles/fase_1/files/WhyNotWin11.exe
+    ```
+    
+    Download from: [WhyNotWin11 Releases](https://github.com/rcmaehl/WhyNotWin11/releases/latest)
+  </Step>
+</Steps>
+
+## Pre-Migration Checklist
+
+<Check>Ansible control node is running a Unix-like OS</Check>
+<Check>Ansible 2.9+ is installed</Check>
+<Check>community.windows collection is installed</Check>
+<Check>Target systems are running Windows 10 Pro</Check>
+<Check>WinRM is enabled and configured on target systems</Check>
+<Check>Network connectivity to targets on WinRM ports</Check>
+<Check>Ansible user has administrator privileges</Check>
+<Check>Target systems meet Windows 11 hardware requirements</Check>
+<Check>Windows 11 ISO is placed in roles/fase_2/files/</Check>
+<Check>WhyNotWin11.exe is placed in roles/fase_1/files/</Check>
+<Check>Backups of critical data are completed</Check>
+<Check>Testing environment is available for validation</Check>
+
+<Warning>
+  **Important:** Always test the migration process on non-production systems first. Create full system backups before proceeding with production migrations.
+</Warning>
+
+## Next Steps
+
+Once all prerequisites are met, proceed to the [Quickstart Guide](/quickstart) to configure your inventory and run your first migration.

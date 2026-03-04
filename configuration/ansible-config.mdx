@@ -1,0 +1,132 @@
+---
+title: 'Ansible Configuration'
+description: 'Understand the Ansible configuration file settings'
+icon: 'gear'
+---
+
+The `ansible.cfg` file contains the main configuration settings for Ansible. This file controls how Ansible behaves when executing playbooks and managing hosts.
+
+## Configuration File
+
+The configuration file is located at `ansible.cfg` in the project root directory.
+
+<CodeGroup>
+```ini ansible.cfg
+[defaults]
+inventory=maquinas
+```
+</CodeGroup>
+
+## Configuration Options
+
+### [defaults] Section
+
+The `[defaults]` section contains general Ansible configuration options.
+
+<ParamField path="inventory" type="string" default="/etc/ansible/hosts">
+  Specifies the path to the inventory file that Ansible will use.
+  
+  **Value:** `maquinas`
+  
+  This setting tells Ansible to use the `maquinas` file in the current directory as the inventory, which contains the Windows hosts and their connection parameters.
+</ParamField>
+
+## Why This Configuration?
+
+This minimal configuration is intentional:
+
+<CardGroup cols={2}>
+  <Card title="Simplified Inventory" icon="list">
+    By specifying `inventory=maquinas`, you don't need to use the `-i` flag when running playbooks. Ansible automatically knows where to find the hosts.
+  </Card>
+  
+  <Card title="Project-Specific" icon="folder">
+    The configuration is kept simple and project-specific, making it easy to understand and maintain for the Windows migration tasks.
+  </Card>
+</CardGroup>
+
+## Using the Configuration
+
+With this configuration in place, you can run playbooks without specifying the inventory:
+
+<CodeGroup>
+```bash With ansible.cfg
+ansible-playbook playbook.yml
+```
+
+```bash Without ansible.cfg
+ansible-playbook -i maquinas playbook.yml
+```
+</CodeGroup>
+
+The first command works because `ansible.cfg` automatically points to the `maquinas` inventory file.
+
+## Configuration Precedence
+
+Ansible loads configuration files in the following order (highest to lowest priority):
+
+<Steps>
+  <Step title="ANSIBLE_CONFIG environment variable">
+    If set, Ansible uses the configuration file specified by this environment variable.
+  </Step>
+  
+  <Step title="ansible.cfg in current directory">
+    This is the configuration file used by this project.
+  </Step>
+  
+  <Step title="~/.ansible.cfg in home directory">
+    User-specific configuration file.
+  </Step>
+  
+  <Step title="/etc/ansible/ansible.cfg">
+    System-wide configuration file.
+  </Step>
+</Steps>
+
+<Info>
+  This project uses the `ansible.cfg` file in the current directory, which takes precedence over user and system configurations.
+</Info>
+
+## Additional Configuration Options
+
+While this project uses a minimal configuration, you can add additional options as needed:
+
+<AccordionGroup>
+  <Accordion title="Common Additional Options">
+    ```ini
+    [defaults]
+    inventory=maquinas
+    host_key_checking=False
+    retry_files_enabled=False
+    timeout=30
+    
+    [ssh_connection]
+    pipelining=True
+    ```
+  </Accordion>
+  
+  <Accordion title="Logging and Debugging">
+    ```ini
+    [defaults]
+    inventory=maquinas
+    log_path=./ansible.log
+    display_skipped_hosts=False
+    display_args_to_stdout=False
+    ```
+  </Accordion>
+  
+  <Accordion title="Performance Tuning">
+    ```ini
+    [defaults]
+    inventory=maquinas
+    forks=10
+    gathering=smart
+    fact_caching=jsonfile
+    fact_caching_connection=/tmp/ansible_facts
+    ```
+  </Accordion>
+</AccordionGroup>
+
+<Tip>
+  For the Windows 10 to 11 migration use case, the minimal configuration is sufficient. Add options only if you need specific functionality.
+</Tip>

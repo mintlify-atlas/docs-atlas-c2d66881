@@ -1,0 +1,145 @@
+---
+title: Windows 10 to 11 Migration Tool
+description: Automated Ansible-based migration solution for upgrading Windows 10 Pro systems to Windows 11
+---
+
+<img
+  className="block dark:hidden"
+  src="/images/hero-light.svg"
+  alt="Hero Light"
+/>
+<img
+  className="hidden dark:block"
+  src="/images/hero-dark.svg"
+  alt="Hero Dark"
+/>
+
+## Welcome to Windows 10 to 11 Migration
+
+This Ansible automation tool streamlines the migration from Windows 10 Pro to Windows 11, ensuring hardware compatibility, system preparation, and a smooth upgrade process. Built for IT administrators managing enterprise Windows environments.
+
+<Note>
+  This tool is specifically designed for **Windows 10 Pro** systems and uses WinRM for remote management.
+</Note>
+
+## Two-Phase Migration Process
+
+The migration is orchestrated through two distinct phases:
+
+<AccordionGroup>
+  <Accordion icon="check-circle" title="Phase 1: Pre-Upgrade" iconType="solid">
+    **Validation and Requirements**
+    
+    - Operating system validation (Windows 10 Pro)
+    - Hardware compatibility check using WhyNotWin11
+    - System restore point creation
+    - Windows updates and patches application
+    - Compatibility report generation
+    
+    This phase ensures your system meets all Windows 11 requirements before attempting the upgrade.
+  </Accordion>
+  
+  <Accordion icon="arrow-up" title="Phase 2: Upgrade" iconType="solid">
+    **Migration Execution**
+    
+    - WinRM configuration persistence
+    - Windows 11 ISO mounting and deployment
+    - Registry modifications for upgrade targeting
+    - Automated installation and reboot handling
+    - Post-upgrade validation and reporting
+    
+    The upgrade process is fully automated with minimal user intervention required.
+  </Accordion>
+</AccordionGroup>
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card
+    title="Hardware Compatibility"
+    icon="microchip"
+    iconType="duotone"
+  >
+    Automated validation of TPM 2.0, Secure Boot, CPU compatibility, RAM, storage, and all Windows 11 requirements using WhyNotWin11.
+  </Card>
+  
+  <Card
+    title="System Protection"
+    icon="shield-check"
+    iconType="duotone"
+  >
+    Automatic creation of system restore points before migration, ensuring rollback capability if needed.
+  </Card>
+  
+  <Card
+    title="Unattended Migration"
+    icon="robot"
+    iconType="duotone"
+  >
+    Fully automated upgrade process with silent installation, automatic reboots, and persistent WinRM connectivity.
+  </Card>
+  
+  <Card
+    title="Detailed Reporting"
+    icon="file-chart-column"
+    iconType="duotone"
+  >
+    Comprehensive compatibility and upgrade reports generated for each system, tracking all migration metrics.
+  </Card>
+</CardGroup>
+
+## Getting Started
+
+<CardGroup cols={3}>
+  <Card
+    title="Prerequisites"
+    icon="list-check"
+    href="/prerequisites"
+  >
+    Review system requirements and prepare your environment
+  </Card>
+  
+  <Card
+    title="Quickstart Guide"
+    icon="rocket"
+    href="/quickstart"
+  >
+    Follow step-by-step instructions to run your first migration
+  </Card>
+  
+  <Card
+    title="Configuration"
+    icon="gear"
+    href="/configuration/inventory"
+  >
+    Learn about inventory setup and customization options
+  </Card>
+</CardGroup>
+
+## Architecture Overview
+
+The tool leverages Ansible's agentless architecture to manage Windows systems remotely:
+
+```mermaid
+graph LR
+    A[Ansible Control Node] -->|WinRM| B[Windows 10 Target]
+    B -->|Phase 1| C[Compatibility Check]
+    C -->|Phase 2| D[Windows 11 Upgrade]
+    D --> E[Windows 11 System]
+```
+
+<Warning>
+  Always test migrations in a non-production environment first. Ensure you have backups of critical data before proceeding.
+</Warning>
+
+## Technology Stack
+
+- **Ansible**: Automation engine
+- **WinRM**: Windows Remote Management protocol
+- **PowerShell**: Windows system automation
+- **WhyNotWin11**: Hardware compatibility validation tool
+- **Windows 11 ISO**: Official Microsoft installation media
+
+## Next Steps
+
+Ready to begin? Start with the [prerequisites](/prerequisites) to ensure your environment is properly configured, then proceed to the [quickstart guide](/quickstart) to run your first migration.

@@ -1,80 +1,613 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart Guide
+description: Step-by-step guide to running your first Windows 10 to 11 migration
 ---
 
-## Get started in three steps
+## Overview
 
-Get your documentation site running locally and make your first customization.
-
-### Step 1: Set up your local environment
-
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
-
-<CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
-</CardGroup>
+This guide walks you through running the Windows 10 to 11 migration playbook from initial setup to completion. Follow these steps in order for a successful migration.
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  Ensure you've completed all [prerequisites](/prerequisites) before starting this guide.
 </Note>
+
+## Step 1: Install Ansible Collections
+
+<Steps>
+  <Step title="Navigate to the project directory">
+    ```bash
+    cd /path/to/migra_to_w11
+    ```
+  </Step>
+  
+  <Step title="Install required collections">
+    The project includes a `requirements.yml` file that specifies the necessary Ansible collections:
+    
+    ```yaml requirements.yml
+    ---
+    collections:
+      - name: community.windows
+    ```
+    
+    Install it using:
+    ```bash
+    ansible-galaxy collection install -r requirements.yml
+    ```
+    
+    Expected output:
+    ```
+    Starting galaxy collection install process
+    Process install dependency map
+    Starting collection install process
+    Downloading https://galaxy.ansible.com/download/community-windows-x.x.x.tar.gz to ...
+    Installing 'community.windows:x.x.x' to ...
+    community.windows (x.x.x) was installed successfully
+    ```
+  </Step>
+  
+  <Step title="Verify collection installation">
+    ```bash
+    ansible-galaxy collection list | grep community.windows
+    ```
+  </Step>
+</Steps>
+
+## Step 2: Configure Inventory File
+
+<Steps>
+  <Step title="Review the inventory file">
+    The project includes a `maquinas` inventory file. Review its structure:
+    
+    ```ini maquinas
+    [windows_sql:vars]
+    ansible_user = ansible
+    ansible_password = ansible123
+    ansible_port = 5986
+    ansible_connection = winrm
+    ansible_winrm_transport = ntlm
+    ansible_winrm_server_cert_validation = ignore
+    
+    [windows_sql]
+    w10
+    ```
+    
+    <Info>
+      The inventory is already referenced in `ansible.cfg`:
+      ```ini
+      [defaults]
+      inventory=maquinas
+      ```
+    </Info>
+  </Step>
+  
+  <Step title="Customize for your environment">
+    Edit the `maquinas` file to match your environment:
+    
+    <AccordionGroup>
+      <Accordion title="Update connection credentials" icon="key">
+        Replace with your Windows admin credentials:
+        ```ini
+        ansible_user = your_admin_user
+        ansible_password = your_secure_password
+        ```
+        
+        <Warning>
+          For production use, consider using Ansible Vault to encrypt credentials:
+          ```bash
+          ansible-vault create group_vars/windows_sql/vault.yml
+          ```
+        </Warning>
+      </Accordion>
+      
+      <Accordion title="Configure WinRM port" icon="network-wired">
+        - Use **5986** for HTTPS (recommended)
+        - Use **5985** for HTTP (testing only)
+        
+        ```ini
+        ansible_port = 5986  # HTTPS
+        ```
+      </Accordion>
+      
+      <Accordion title="Add target hosts" icon="server">
+        Replace `w10` with your actual Windows 10 hostnames or IP addresses:
+        ```ini
+        [windows_sql]
+        win10-pc01.domain.local
+        win10-pc02.domain.local
+        192.168.1.100
+        ```
+      </Accordion>
+    </AccordionGroup>
+  </Step>
+  
+  <Step title="Test connectivity">
+    Verify Ansible can connect to your Windows hosts:
+    
+    ```bash
+    ansible windows_sql -m win_ping
+    ```
+    
+    Successful output:
+    ```json
+    w10 | SUCCESS => {
+        "changed": false,
+        "ping": "pong"
+    }
+    ```
+    
+    <Tip>
+      If connection fails, verify WinRM is enabled on the target and firewall rules allow connections.
+    </Tip>
+  </Step>
+</Steps>
+
+## Step 3: Prepare Required Files
+
+<Steps>
+  <Step title="Download WhyNotWin11">
+    Download the latest WhyNotWin11 executable:
+    
+    ```bash
+    # Create the files directory if it doesn't exist
+    mkdir -p roles/fase_1/files
+    
+    # Download WhyNotWin11
+    cd roles/fase_1/files
+    wget https://github.com/rcmaehl/WhyNotWin11/releases/latest/download/WhyNotWin11.exe
+    ```
+    
+    Or download manually and place at:
+    ```
+    roles/fase_1/files/WhyNotWin11.exe
+    ```
+  </Step>
+  
+  <Step title="Obtain Windows 11 ISO">
+    Download the Windows 11 ISO from Microsoft:
+    
+    1. Visit the [Windows 11 download page](https://www.microsoft.com/software-download/windows11)
+    2. Download the ISO for your language/region
+    3. Place it at:
+       ```
+       roles/fase_2/files/Win11_23H2_Spanish_Mexico_x64v2.iso
+       ```
+    
+    <Note>
+      The playbook expects the Spanish (Mexico) version. If using a different version, update the ISO filename in:
+      - `roles/fase_2/tasks/main.yml` (line 42)
+      - `roles/fase_2/tasks/main.yml` (line 54)
+      - `roles/fase_2/tasks/main.yml` (line 59)
+    </Note>
+  </Step>
+  
+  <Step title="Prepare WinRM recovery script">
+    Ensure the WinRM PowerShell script exists:
+    
+    ```bash
+    ls roles/fase_2/files/WinRM.ps1
+    ```
+    
+    This script is automatically deployed to maintain WinRM connectivity during reboots.
+  </Step>
+</Steps>
+
+## Step 4: Review Migration Playbook
+
+Understand what the playbook will do before running it:
+
+```yaml migra_w10_to_w11.yml
+---
+- name: Migracion SO Windows 10 a 11
+  hosts: all
+  gather_facts: true
+
+  pre_tasks:
+    - name: Crear Tarea Programada para recuperar Script WinRM
+      community.windows.win_scheduled_task:
+        name: "WinRM Setup"
+        description: "Restaurar Configuración de WinRM"
+        actions:
+          - path: "powershell.exe"
+            arguments: "-NoProfile -ExecutionPolicy Bypass -File C:/temp/ansible/PS/WinRM.ps1"
+        triggers:
+          - type: boot
+        state: present
+        enabled: true
+        user: "SYSTEM"
+        logon_type: service_account
+
+  tasks:
+    - name: FASE 1 - PRE-UPGRADE
+      block:
+        - name: 1 - Validación y Ejecución de Requisitos
+          ansible.builtin.include_role:
+            name: fase_1
+
+    - name: FASE 2 - UPGRADE
+      when:
+        - not compatible # -- OJO -- Valor REAL: compatible
+        - ansible_distribution == "Microsoft Windows 10 Pro"
+      block:
+        - name: 2 - Proceso de Upgrade
+          ansible.builtin.include_role:
+            name: fase_2
+            tasks_from: regedit_main.yml
+```
+
+<Warning>
+  **Important:** The playbook has `not compatible` on line 30, which appears to be for testing. In production, this should be `compatible` to only upgrade systems that pass compatibility checks.
+</Warning>
+
+<AccordionGroup>
+  <Accordion title="Pre-tasks: WinRM Persistence" icon="shield" defaultOpen>
+    Creates a scheduled task to restore WinRM configuration after reboots, ensuring Ansible maintains connectivity throughout the migration.
+  </Accordion>
+  
+  <Accordion title="Phase 1: Pre-Upgrade" icon="check-circle">
+    The `fase_1` role performs:
+    
+    1. **OS Validation**: Confirms Windows 10 Pro
+    2. **Hardware Compatibility Check**: Runs WhyNotWin11
+    3. **Compatibility Analysis**: Validates all Windows 11 requirements
+    4. **Restore Point Creation**: Creates system recovery point
+    5. **Windows Updates**: Applies all pending patches
+    
+    Key task from `roles/fase_1/tasks/main.yml`:
+    ```yaml
+    - name: 2.12 Validar si el PC es Compatible con Windows 11
+      ansible.builtin.set_fact:
+        compatible: true
+      when:
+        - architecture == 'True'
+        - boot_method == 'True'
+        - cpu_compatibility == 'True'
+        - cpu_core_count == 'True'
+        - cpu_frequency == 'True'
+        - directx_wddm2 == 'True'
+        - disk_partition_type == 'True'
+        - ram_installed == 'True'
+        - secure_boot == 'True'
+        - storage_available == 'True'
+        - tpm_version == 'True'
+    ```
+  </Accordion>
+  
+  <Accordion title="Phase 2: Upgrade" icon="arrow-up">
+    The `fase_2` role (using `regedit_main.yml`) performs:
+    
+    1. **WinRM Script Deployment**: Copies recovery script
+    2. **Registry Configuration**: Sets Windows Update target to Windows 11
+    3. **Update Search & Download**: Fetches Windows 11 upgrade
+    4. **Installation**: Applies the upgrade
+    5. **Post-Upgrade Validation**: Verifies Windows 11 installation
+    6. **Registry Cleanup**: Restores original registry values
+    
+    Key registry modifications from `roles/fase_2/tasks/regedit_main.yml`:
+    ```yaml
+    - name: 2.4 Configurar TargetProductVersion
+      ansible.windows.win_regedit:
+        path: HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate
+        name: ProductVersion
+        data: "Windows 11"
+        type: string
+    
+    - name: 2.5 Configurar clave TargetReleaseVersionInfo para la versión de destino
+      ansible.windows.win_regedit:
+        path: HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate
+        name: TargetReleaseVersionInfo
+        data: "23H2"
+        type: string
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Step 5: Run the Migration
+
+<Steps>
+  <Step title="Perform a dry run (optional)">
+    Test the playbook without making changes:
+    
+    ```bash
+    ansible-playbook migra_w10_to_w11.yml --check
+    ```
+    
+    <Info>
+      Note: Some tasks may report failures in check mode as they depend on actual execution results.
+    </Info>
+  </Step>
+  
+  <Step title="Run the migration playbook">
+    Execute the full migration:
+    
+    ```bash
+    ansible-playbook migra_w10_to_w11.yml
+    ```
+    
+    For verbose output (recommended for first run):
+    ```bash
+    ansible-playbook migra_w10_to_w11.yml -v
+    ```
+    
+    For maximum verbosity:
+    ```bash
+    ansible-playbook migra_w10_to_w11.yml -vvv
+    ```
+  </Step>
+  
+  <Step title="Monitor the migration process">
+    The playbook will:
+    
+    <Steps>
+      <Step title="Phase 1 execution (15-30 minutes)">
+        - Validate operating system
+        - Run compatibility checks
+        - Create restore point
+        - Apply Windows updates (if needed)
+        - May reboot if updates require it
+      </Step>
+      
+      <Step title="Phase 2 execution (60-120 minutes)">
+        - Configure registry for Windows 11
+        - Download Windows 11 upgrade packages
+        - Install Windows 11
+        - Multiple reboots will occur
+        - WinRM connectivity is maintained via scheduled task
+      </Step>
+      
+      <Step title="Validation and cleanup">
+        - Verify Windows 11 installation
+        - Generate upgrade report
+        - Restore registry settings
+      </Step>
+    </Steps>
+    
+    <Warning>
+      The migration process can take **1-3 hours** depending on:
+      - System hardware specifications
+      - Network speed for downloading updates
+      - Number of Windows updates to install
+      
+      Do not interrupt the process once started.
+    </Warning>
+  </Step>
+</Steps>
+
+## Step 6: Verify Migration Success
+
+<Steps>
+  <Step title="Check playbook completion">
+    Successful completion shows:
+    
+    ```
+    PLAY RECAP *************************************************
+    w10    : ok=XX   changed=XX   unreachable=0    failed=0    skipped=X    rescued=0    ignored=0
+    ```
+    
+    All hosts should have `failed=0` and `unreachable=0`.
+  </Step>
+  
+  <Step title="Review compatibility report">
+    Check the generated compatibility report:
+    
+    ```bash
+    cat roles/fase_1/files/<hostname>-compatibility_report.txt
+    ```
+    
+    Example output:
+    ```
+    Reporte de Compatibilidad para: w10
+    -----------------------------------------------
+    - Architecture: True
+    - Boot Method: True
+    - CPU Compatibility: True
+    - CPU Core Count: True
+    - CPU Frequency: True
+    - DirectX + WDDM2: True
+    - Disk Partition: True
+    - Ram Installed: True
+    - Secure Boot: True
+    - Storage Available: True
+    - TPM Version: True
+    ```
+  </Step>
+  
+  <Step title="Review upgrade report">
+    Check the post-migration report:
+    
+    ```bash
+    cat roles/fase_2/files/<hostname>-upgrade_report.txt
+    ```
+    
+    This confirms the final OS version and architecture.
+  </Step>
+  
+  <Step title="Verify OS version on target">
+    Connect to the Windows 11 system and verify:
+    
+    ```bash
+    ansible windows_sql -m ansible.windows.win_shell -a "(Get-WmiObject Win32_OperatingSystem).Caption"
+    ```
+    
+    Expected output:
+    ```
+    w10 | CHANGED | rc=0 >>
+    Microsoft Windows 11 Pro
+    ```
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Compatibility check fails" icon="triangle-exclamation">
+    **Symptom**: Phase 1 reports incompatible hardware
+    
+    **Solutions**:
+    1. Review the compatibility report in `roles/fase_1/files/`
+    2. Check which requirements failed (TPM, Secure Boot, CPU, etc.)
+    3. Enable missing features in BIOS/UEFI:
+       - Enable TPM 2.0
+       - Enable Secure Boot
+       - Switch from Legacy BIOS to UEFI
+       - Convert MBR disk to GPT (use `mbr2gpt.exe`)
+    4. For unsupported CPUs, consider hardware upgrade
+  </Accordion>
+  
+  <Accordion title="WinRM connection lost during migration" icon="wifi-slash">
+    **Symptom**: Playbook fails with WinRM timeout errors
+    
+    **Solutions**:
+    1. The scheduled task should auto-restore WinRM after reboot
+    2. Wait 5-10 minutes for the system to complete its boot cycle
+    3. Manually verify WinRM is running:
+       ```powershell
+       Get-Service WinRM
+       ```
+    4. Restart WinRM service if needed:
+       ```powershell
+       Restart-Service WinRM
+       ```
+    5. Re-run the playbook - it will resume from where it failed
+  </Accordion>
+  
+  <Accordion title="Windows 11 upgrade doesn't start" icon="circle-pause">
+    **Symptom**: Phase 2 completes but system stays on Windows 10
+    
+    **Solutions**:
+    1. Check Windows Update manually on the target system
+    2. Verify the registry keys were set correctly:
+       ```powershell
+       Get-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate'
+       ```
+    3. Manually trigger Windows Update:
+       ```powershell
+       Start-Process ms-settings:windowsupdate
+       ```
+    4. Check Windows Update logs at `C:\Windows\Logs\WindowsUpdate\`
+  </Accordion>
+  
+  <Accordion title="Playbook hangs on Windows Updates" icon="clock">
+    **Symptom**: Task "Aplicar parches de ser Necesario" runs for hours
+    
+    **Solutions**:
+    1. This is normal if many updates are pending
+    2. The task has retry logic (3 attempts with 120s delays)
+    3. Monitor the target system's Windows Update UI for progress
+    4. Increase the timeout if needed by modifying:
+       ```yaml
+       retries: 5
+       delay: 300
+       ```
+  </Accordion>
+  
+  <Accordion title="Permission denied errors" icon="lock">
+    **Symptom**: Tasks fail with access denied messages
+    
+    **Solutions**:
+    1. Verify the Ansible user has administrator privileges
+    2. Check UAC settings on the target
+    3. Ensure the user account is in the local Administrators group
+    4. Try using a domain admin account if in a domain environment
+  </Accordion>
+</AccordionGroup>
+
+## Post-Migration Tasks
+
+<Steps>
+  <Step title="Validate system functionality">
+    - Test critical applications
+    - Verify network connectivity
+    - Check driver compatibility
+    - Confirm all peripherals work
+  </Step>
+  
+  <Step title="Clean up temporary files">
+    Optional: Remove temporary files from target systems:
+    
+    ```bash
+    ansible windows_sql -m ansible.windows.win_file -a "path=C:\temp\ansible state=absent"
+    ```
+  </Step>
+  
+  <Step title="Remove scheduled task">
+    If WinRM is stable, remove the recovery scheduled task:
+    
+    ```bash
+    ansible windows_sql -m community.windows.win_scheduled_task -a "name='WinRM Setup' state=absent"
+    ```
+  </Step>
+  
+  <Step title="Document the migration">
+    - Archive compatibility reports
+    - Archive upgrade reports
+    - Update your inventory to reflect Windows 11 systems
+    - Document any issues encountered and resolutions
+  </Step>
+</Steps>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Test First" icon="flask">
+    Always run the migration on test systems before production deployment.
+  </Card>
+  
+  <Card title="Backup Data" icon="cloud-arrow-up">
+    Ensure all critical data is backed up before migration.
+  </Card>
+  
+  <Card title="Schedule Maintenance" icon="calendar">
+    Plan migrations during maintenance windows due to the extended duration.
+  </Card>
+  
+  <Card title="Batch Migrations" icon="layer-group">
+    For multiple systems, migrate in small batches to manage issues effectively.
+  </Card>
+  
+  <Card title="Monitor Progress" icon="chart-line">
+    Use verbose mode (`-v`) for the first few migrations to understand the process.
+  </Card>
+  
+  <Card title="Keep Logs" icon="file-lines">
+    Save playbook output logs for troubleshooting:
+    ```bash
+    ansible-playbook migra_w10_to_w11.yml | tee migration-$(date +%Y%m%d-%H%M%S).log
+    ```
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card
+    title="Configuration Guide"
+    icon="gear"
+    href="/configuration/inventory"
+  >
+    Learn about advanced configuration options and customization
+  </Card>
+  
+  <Card
+    title="Troubleshooting"
+    icon="wrench"
+    href="/operations/troubleshooting"
+  >
+    Detailed troubleshooting guide for common issues
+  </Card>
+  
+  <Card
+    title="Role Reference"
+    icon="book"
+    href="/reference/roles"
+  >
+    Deep dive into Phase 1 and Phase 2 role tasks and variables
+  </Card>
+  
+  <Card
+    title="Migration Phases"
+    icon="list-timeline"
+    href="/phases/overview"
+  >
+    Learn about the two-phase migration process
+  </Card>
+</CardGroup>

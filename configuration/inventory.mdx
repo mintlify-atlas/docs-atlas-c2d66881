@@ -1,0 +1,162 @@
+---
+title: 'Inventory Configuration'
+description: 'Configure the Ansible inventory file for Windows hosts'
+icon: 'server'
+---
+
+The inventory file defines the Windows hosts that will be migrated from Windows 10 to Windows 11 and the connection parameters needed to communicate with them via WinRM.
+
+## Inventory File Location
+
+The inventory file is located at `maquinas` in the project root directory.
+
+## Connection Method
+
+This project uses **WinRM** (Windows Remote Management) over HTTPS to connect to Windows hosts. WinRM must be properly configured on target Windows machines before running the playbooks.
+
+## Inventory Structure
+
+<CodeGroup>
+```ini maquinas
+[windows_sql:vars]
+ansible_user = ansible
+ansible_password = ansible123
+ansible_port = 5986
+ansible_connection = winrm
+ansible_winrm_transport = ntlm
+ansible_winrm_server_cert_validation = ignore
+
+[windows_sql]
+w10
+```
+</CodeGroup>
+
+## Connection Variables
+
+The inventory defines the following Ansible connection variables:
+
+<ParamField path="ansible_user" type="string" required>
+  The username to authenticate with on the Windows host.
+  
+  **Example:** `ansible`
+</ParamField>
+
+<ParamField path="ansible_password" type="string" required>
+  The password for the specified user account.
+  
+  **Example:** `ansible123`
+  
+  <Warning>
+    Storing passwords in plain text is not recommended for production environments. Consider using Ansible Vault to encrypt sensitive data.
+  </Warning>
+</ParamField>
+
+<ParamField path="ansible_port" type="integer" default="5986">
+  The WinRM HTTPS port to connect to.
+  
+  - **5986**: WinRM over HTTPS (default)
+  - **5985**: WinRM over HTTP (not recommended)
+</ParamField>
+
+<ParamField path="ansible_connection" type="string" required>
+  The connection plugin to use for Windows hosts.
+  
+  **Value:** `winrm`
+</ParamField>
+
+<ParamField path="ansible_winrm_transport" type="string" default="ntlm">
+  The authentication method for WinRM connections.
+  
+  **Options:**
+  - `ntlm`: NT LAN Manager authentication (most common)
+  - `basic`: Basic authentication
+  - `kerberos`: Kerberos authentication
+  - `certificate`: Certificate-based authentication
+</ParamField>
+
+<ParamField path="ansible_winrm_server_cert_validation" type="string" default="validate">
+  Controls SSL certificate validation for WinRM connections.
+  
+  - `ignore`: Skip certificate validation (useful for self-signed certificates)
+  - `validate`: Enforce certificate validation
+  
+  <Warning>
+    Setting this to `ignore` disables SSL certificate verification. Only use this in trusted networks or development environments.
+  </Warning>
+</ParamField>
+
+## Host Groups
+
+### windows_sql
+
+The `[windows_sql]` group contains the Windows hosts to be migrated. In the example, there is one host named `w10`.
+
+<CodeGroup>
+```ini Host Group
+[windows_sql]
+w10
+```
+</CodeGroup>
+
+You can add multiple hosts to this group:
+
+<CodeGroup>
+```ini Multiple Hosts
+[windows_sql]
+w10-host-01
+w10-host-02
+w10-host-03
+```
+</CodeGroup>
+
+## Prerequisites
+
+Before using this inventory, ensure that:
+
+<Steps>
+  <Step title="Enable WinRM on Windows hosts">
+    WinRM must be enabled and configured to accept connections on port 5986.
+    
+    ```powershell
+    Enable-PSRemoting -Force
+    winrm quickconfig -transport:https
+    ```
+  </Step>
+  
+  <Step title="Configure firewall rules">
+    Ensure Windows Firewall allows WinRM connections on port 5986.
+  </Step>
+  
+  <Step title="Create user account">
+    Create the user account specified in `ansible_user` with appropriate permissions (local administrator recommended).
+  </Step>
+  
+  <Step title="Install Python WinRM library">
+    Install the required Python package on your Ansible control node:
+    
+    ```bash
+    pip install pywinrm
+    ```
+  </Step>
+</Steps>
+
+## Testing Connectivity
+
+Test the connection to your Windows hosts:
+
+<CodeGroup>
+```bash Ping Test
+ansible windows_sql -m win_ping
+```
+
+```bash Expected Output
+w10 | SUCCESS => {
+    "changed": false,
+    "ping": "pong"
+}
+```
+</CodeGroup>
+
+<Tip>
+  If the connection fails, verify that WinRM is properly configured on the target host and that firewall rules allow traffic on port 5986.
+</Tip>

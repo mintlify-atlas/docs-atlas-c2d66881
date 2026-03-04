@@ -1,0 +1,581 @@
+---
+title: "Troubleshooting"
+description: "Common issues, solutions, and recovery procedures for Windows 11 migration"
+icon: "wrench"
+---
+
+## Overview
+
+This guide covers common issues encountered during Windows 10 to 11 migration, along with detailed solutions and recovery procedures.
+
+<Warning>
+Always ensure you have a valid restore point before attempting any migration. The tool creates one automatically.
+</Warning>
+
+## WinRM Connectivity Issues
+
+WinRM (Windows Remote Management) is critical for Ansible communication with Windows hosts.
+
+### Common Symptoms
+
+<AccordionGroup>
+  <Accordion title="Connection Timeout">
+    ```
+    fatal: [hostname]: UNREACHABLE! => {"msg": "Failed to connect to the host via ssh"}
+    ```
+  </Accordion>
+  
+  <Accordion title="Authentication Failure">
+    ```
+    fatal: [hostname]: UNREACHABLE! => {"msg": "plaintext: the specified credentials were rejected by the server"}
+    ```
+  </Accordion>
+  
+  <Accordion title="SSL Certificate Error">
+    ```
+    fatal: [hostname]: UNREACHABLE! => {"msg": "ssl: certificate verify failed"}
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### WinRM Configuration Script
+
+The migration tool includes a comprehensive WinRM setup script that runs on every boot:
+
+```yaml /home/daytona/workspace/source/migra_w10_to_w11.yml:7-19
+pre_tasks:
+  - name: Crear Tarea Programada para recuperar Script WinRM
+    community.windows.win_scheduled_task:
+      name: "WinRM Setup"
+      description: "Restaurar Configuración de WinRM"
+      actions:
+        - path: "powershell.exe"
+          arguments: "-NoProfile -ExecutionPolicy Bypass -File C:/temp/ansible/PS/WinRM.ps1"
+      triggers:
+        - type: boot
+      state: present
+      enabled: true
+      user: "SYSTEM"
+      logon_type: service_account
+```
+
+<Info>
+**Scheduled Task**: WinRM configuration runs automatically on system boot using the SYSTEM account.
+</Info>
+
+### Manual WinRM Verification
+
+To verify WinRM is running correctly on a target system:
+
+```powershell
+# Check WinRM service status
+Get-Service WinRM
+
+# Test WinRM connectivity locally
+Test-WSMan -ComputerName localhost
+
+# Check WinRM listeners
+Get-ChildItem WSMan:\localhost\Listener
+
+# Verify firewall rules
+netsh advfirewall firewall show rule name="Allow WinRM HTTPS"
+```
+
+### WinRM Script Features
+
+The included WinRM configuration script (`WinRM.ps1`) provides:
+
+<Steps>
+  <Step title="Service Verification">
+    Ensures WinRM service exists and is running
+    
+    ```powershell /home/daytona/workspace/source/roles/fase_2/files/WinRM.ps1:264-278
+    # Find and start the WinRM service.
+    Write-Verbose "Verifying WinRM service."
+    If (!(Get-Service "WinRM")) {
+        Write-ProgressLog "Unable to find the WinRM service."
+        Throw "Unable to find the WinRM service."
+    }
+    ElseIf ((Get-Service "WinRM").Status -ne "Running") {
+        Write-Verbose "Setting WinRM service to start automatically on boot."
+        Set-Service -Name "WinRM" -StartupType Automatic
+        Write-ProgressLog "Set WinRM service to start automatically on boot."
+        Write-Verbose "Starting WinRM service."
+        Start-Service -Name "WinRM" -ErrorAction Stop
+        Write-ProgressLog "Started WinRM service."
+    }
+    ```
+  </Step>
+  
+  <Step title="PS Remoting Enablement">
+    Enables PowerShell remoting (required for Ansible)
+    
+    ```powershell /home/daytona/workspace/source/roles/fase_2/files/WinRM.ps1:280-295
+    # WinRM should be running; check that we have a PS session config.
+    If (!(Get-PSSessionConfiguration -Verbose:$false) -or (!(Get-ChildItem WSMan:\localhost\Listener))) {
+        If ($SkipNetworkProfileCheck) {
+            Write-Verbose "Enabling PS Remoting without checking Network profile."
+            Enable-PSRemoting -SkipNetworkProfileCheck -Force -ErrorAction Stop
+            Write-ProgressLog "Enabled PS Remoting without checking Network profile."
+        }
+        Else {
+            Write-Verbose "Enabling PS Remoting."
+            Enable-PSRemoting -Force -ErrorAction Stop
+            Write-ProgressLog "Enabled PS Remoting."
+        }
+    }
+    Else {
+        Write-Verbose "PS Remoting is already enabled."
+    }
+    ```
+  </Step>
+  
+  <Step title="Local Account Token Filter">
+    Configures registry for remote local account access
+    
+    ```powershell /home/daytona/workspace/source/roles/fase_2/files/WinRM.ps1:297-309
+    # Ensure LocalAccountTokenFilterPolicy is set to 1
+    $token_path = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
+    $token_prop_name = "LocalAccountTokenFilterPolicy"
+    $token_key = Get-Item -Path $token_path
+    $token_value = $token_key.GetValue($token_prop_name, $null)
+    if ($token_value -ne 1) {
+        Write-Verbose "Setting LocalAccountTOkenFilterPolicy to 1"
+        if ($null -ne $token_value) {
+            Remove-ItemProperty -Path $token_path -Name $token_prop_name
+        }
+        New-ItemProperty -Path $token_path -Name $token_prop_name -Value 1 -PropertyType DWORD > $null
+    }
+    ```
+  </Step>
+  
+  <Step title="SSL Certificate Creation">
+    Generates self-signed certificate for HTTPS listener
+    
+    ```powershell /home/daytona/workspace/source/roles/fase_2/files/WinRM.ps1:311-332
+    # Make sure there is a SSL listener.
+    $listeners = Get-ChildItem WSMan:\localhost\Listener
+    If (!($listeners | Where-Object { $_.Keys -like "TRANSPORT=HTTPS" })) {
+        # We cannot use New-SelfSignedCertificate on 2012R2 and earlier
+        $thumbprint = New-LegacySelfSignedCert -SubjectName $SubjectName -ValidDays $CertValidityDays
+        Write-HostLog "Self-signed SSL certificate generated; thumbprint: $thumbprint"
+
+        # Create the hashtables of settings to be used.
+        $valueset = @{
+            Hostname = $SubjectName
+            CertificateThumbprint = $thumbprint
+        }
+
+        $selectorset = @{
+            Transport = "HTTPS"
+            Address = "*"
+        }
+
+        Write-Verbose "Enabling SSL listener."
+        New-WSManInstance -ResourceURI 'winrm/config/Listener' -SelectorSet $selectorset -ValueSet $valueset
+        Write-ProgressLog "Enabled SSL listener."
+    }
+    ```
+  </Step>
+  
+  <Step title="Firewall Configuration">
+    Adds firewall rules for WinRM HTTPS (port 5986)
+    
+    ```powershell /home/daytona/workspace/source/roles/fase_2/files/WinRM.ps1:399-414
+    # Configure firewall to allow WinRM HTTPS connections.
+    $fwtest1 = netsh advfirewall firewall show rule name="Allow WinRM HTTPS"
+    $fwtest2 = netsh advfirewall firewall show rule name="Allow WinRM HTTPS" profile=any
+    If ($fwtest1.count -lt 5) {
+        Write-Verbose "Adding firewall rule to allow WinRM HTTPS."
+        netsh advfirewall firewall add rule profile=any name="Allow WinRM HTTPS" dir=in localport=5986 protocol=TCP action=allow
+        Write-ProgressLog "Added firewall rule to allow WinRM HTTPS."
+    }
+    ElseIf (($fwtest1.count -ge 5) -and ($fwtest2.count -lt 5)) {
+        Write-Verbose "Updating firewall rule to allow WinRM HTTPS for any profile."
+        netsh advfirewall firewall set rule name="Allow WinRM HTTPS" new profile=any
+        Write-ProgressLog "Updated firewall rule to allow WinRM HTTPS for any profile."
+    }
+    Else {
+        Write-Verbose "Firewall rule already exists to allow WinRM HTTPS."
+    }
+    ```
+  </Step>
+  
+  <Step title="Connection Testing">
+    Validates HTTP and HTTPS connectivity
+    
+    ```powershell /home/daytona/workspace/source/roles/fase_2/files/WinRM.ps1:416-434
+    # Test a remoting connection to localhost, which should work.
+    $httpResult = Invoke-Command -ComputerName "localhost" -ScriptBlock { $using:env:COMPUTERNAME } -ErrorVariable httpError -ErrorAction SilentlyContinue
+    $httpsOptions = New-PSSessionOption -SkipCACheck -SkipCNCheck -SkipRevocationCheck
+
+    $httpsResult = New-PSSession -UseSSL -ComputerName "localhost" -SessionOption $httpsOptions -ErrorVariable httpsError -ErrorAction SilentlyContinue
+
+    If ($httpResult -and $httpsResult) {
+        Write-Verbose "HTTP: Enabled | HTTPS: Enabled"
+    }
+    ElseIf ($httpsResult -and !$httpResult) {
+        Write-Verbose "HTTP: Disabled | HTTPS: Enabled"
+    }
+    ElseIf ($httpResult -and !$httpsResult) {
+        Write-Verbose "HTTP: Enabled | HTTPS: Disabled"
+    }
+    Else {
+        Write-ProgressLog "Unable to establish an HTTP or HTTPS remoting session."
+        Throw "Unable to establish an HTTP or HTTPS remoting session."
+    }
+    ```
+  </Step>
+</Steps>
+
+### WinRM Solution Steps
+
+<CodeGroup>
+```powershell Windows (Target System)
+# Run on the Windows 10 target system
+powershell.exe -ExecutionPolicy Bypass -File C:\temp\ansible\PS\WinRM.ps1
+```
+
+```bash Linux (Ansible Controller)
+# Test connectivity from Ansible controller
+ansible windows -m win_ping
+
+# Check WinRM with verbose output
+ansible windows -m win_ping -vvv
+```
+</CodeGroup>
+
+## Compatibility Check Failures
+
+When systems fail compatibility validation, specific remediation steps are required.
+
+### Failed Check: TPM 2.0
+
+<Tabs>
+  <Tab title="Solution">
+    **Enable TPM in BIOS/UEFI**:
+    
+    1. Reboot system and enter BIOS/UEFI (F2, F10, DEL, or manufacturer-specific key)
+    2. Navigate to Security settings
+    3. Enable TPM (may be called "Security Chip," "Security Device," or "PTT")
+    4. Save and exit
+    5. Re-run compatibility check
+  </Tab>
+  
+  <Tab title="Verification">
+    ```powershell
+    # Check TPM status
+    Get-Tpm
+    
+    # Expected output for TPM 2.0
+    TpmPresent                : True
+    TpmReady                  : True
+    TpmEnabled                : True
+    TpmActivated              : True
+    ManufacturerId            : INTC
+    ManufacturerVersion       : 402.1.0.0
+    SpecVersion               : 2.0
+    ```
+  </Tab>
+</Tabs>
+
+### Failed Check: Secure Boot
+
+<Tabs>
+  <Tab title="Solution">
+    **Enable Secure Boot in UEFI**:
+    
+    1. System must be in UEFI mode (not Legacy BIOS)
+    2. Reboot and enter UEFI settings
+    3. Navigate to Boot or Security settings
+    4. Enable Secure Boot
+    5. Save and reboot
+  </Tab>
+  
+  <Tab title="Verification">
+    ```powershell
+    # Check Secure Boot status
+    Confirm-SecureBootUEFI
+    
+    # Returns True if enabled, False if disabled
+    # Returns error if system is in Legacy BIOS mode
+    ```
+  </Tab>
+</Tabs>
+
+### Failed Check: GPT Disk Partition
+
+<Warning>
+**Data Loss Risk**: Converting MBR to GPT requires careful planning and can result in data loss if not done correctly.
+</Warning>
+
+<Tabs>
+  <Tab title="Non-Destructive Conversion">
+    ```powershell
+    # Convert MBR to GPT without data loss (Windows 10 1703+)
+    mbr2gpt /convert /allowFullOS
+    
+    # Validate before conversion
+    mbr2gpt /validate /allowFullOS
+    ```
+  </Tab>
+  
+  <Tab title="Verification">
+    ```powershell
+    # Check partition style
+    Get-Disk | Select-Object Number, FriendlyName, PartitionStyle
+    
+    # Expected output:
+    # PartitionStyle: GPT (not MBR)
+    ```
+  </Tab>
+</Tabs>
+
+### Failed Check: CPU Compatibility
+
+<Info>
+CPU compatibility cannot be resolved through configuration. Unsupported CPUs require hardware replacement.
+</Info>
+
+**Windows 11 CPU Requirements**:
+- **Intel**: 8th generation (Coffee Lake) or newer
+- **AMD**: Ryzen 2000 series or newer
+
+Check Microsoft's official [supported CPU list](https://learn.microsoft.com/en-us/windows-hardware/design/minimum/supported/windows-11-supported-intel-processors).
+
+## Upgrade Failures
+
+Upgrade failures can occur during the migration process.
+
+### Error Handling in Playbooks
+
+The playbooks include rescue blocks for graceful failure handling:
+
+```yaml /home/daytona/workspace/source/roles/fase_1/tasks/main.yml:13-30
+rescue:
+  - name: <ERROR> - 1.1 Recolectar Información del PC
+    block:
+      - name: <ERROR> - Validacion de SO
+        ansible.builtin.debug:
+          msg: "No se pudo ejecutar valdiacion de SO, asegúrese de que el PC está ejecutando Windows 10."
+
+      - name: 1.2 Registrar PC No Compatible
+        ansible.builtin.copy:
+          content: "{{ ansible_fqdn }}: NO es compatible con Windows 10\n"
+          dest: roles/fase_1/files/not_compliant_hosts.log
+          mode: a
+          remote_src: false
+        delegate_to: localhost
+
+      - name: 1.3 Falla en ejecucion - Saltar ejecucion de tareas
+        ansible.builtin.fail:
+          msg: "El Sistema Operativo no es Windows 10. Abordando tareas posteriores"
+```
+
+### Common Upgrade Errors
+
+<AccordionGroup>
+  <Accordion title="Error 0xC1900101">
+    **Cause**: Driver incompatibility
+    
+    **Solution**:
+    1. Update all drivers before migration
+    2. Remove incompatible hardware/peripherals
+    3. Check `C:\temp\ansible\` logs for specific driver issues
+  </Accordion>
+  
+  <Accordion title="Error 0x800F0922">
+    **Cause**: Insufficient disk space or system reserved partition issues
+    
+    **Solution**:
+    1. Free up disk space (need 20GB+ free)
+    2. Clean temp files: `cleanmgr.exe`
+    3. Extend system reserved partition if needed
+  </Accordion>
+  
+  <Accordion title="Setup Failed to Validate Product Key">
+    **Cause**: License validation issue
+    
+    **Solution**:
+    1. Ensure Windows 10 is activated
+    2. Check: `slmgr /xpr`
+    3. Reactivate if necessary: `slmgr /ato`
+  </Accordion>
+</AccordionGroup>
+
+### Accessing Installation Logs
+
+Setup logs are copied to `C:\temp\ansible` for troubleshooting:
+
+```powershell
+# View main setup log
+Get-Content C:\temp\ansible\setuperr.log
+
+# View detailed compatibility issues
+Get-Content C:\$Windows.~BT\Sources\Panther\setupact.log
+
+# Check Windows Update logs (registry method)
+Get-WindowsUpdateLog
+```
+
+## Restore Points and Rollback
+
+The migration tool automatically creates a system restore point before upgrade.
+
+### Automatic Restore Point Creation
+
+```yaml /home/daytona/workspace/source/roles/fase_1/tasks/main.yml:188-218
+- name: 3. Crear punto de restauración
+  when:
+    - not compatible # -- OJO -- Valor REAL: compatible
+    - ansible_distribution == "Microsoft Windows 10 Pro"
+  block:
+    - name: 3.1 Comprobar el estado de Proteccion del Sistema
+      ansible.windows.win_shell: |
+        (Get-ComputerRestorePoint).SequenceNumber
+      args:
+        executable: powershell.exe
+      changed_when: false
+      register: restore_points
+
+    - name: 3.2 Activar la Proteccion del Sistema (si no esta activo)
+      ansible.windows.win_shell: |
+        Enable-ComputerRestore -Drive C:
+      when: restore_points.stdout == ""
+      register: activate_out
+
+    - name: 3.3 Crear Punto de Restauracion
+      ansible.windows.win_shell: |
+        Checkpoint-Computer -Description "Pre-Windows11-Migration" -RestorePointType "MODIFY_SETTINGS"
+      args:
+        executable: powershell.exe
+      register: create_point
+      changed_when: create_point.stdout == ""
+
+    - name: <DEBUG> - Crear Punto de Restauracion
+      ansible.builtin.debug:
+        msg: "{{ create_point.stdout_lines }}"
+      when: create_point.stdout != ""
+```
+
+<Check>
+**Restore Point Name**: "Pre-Windows11-Migration"
+</Check>
+
+### Manual Rollback Procedure
+
+If the upgrade fails or causes issues, you can roll back:
+
+<Steps>
+  <Step title="Access Recovery">
+    **Option 1 - Windows Recovery**:
+    - Settings > Update & Security > Recovery > Go back to previous version
+    
+    **Option 2 - Boot to Recovery**:
+    - Hold Shift + Restart
+    - Troubleshoot > Advanced options > System Restore
+  </Step>
+  
+  <Step title="Select Restore Point">
+    Choose the "Pre-Windows11-Migration" restore point
+  </Step>
+  
+  <Step title="Confirm and Restore">
+    Follow the wizard to complete restoration (typically 15-30 minutes)
+  </Step>
+  
+  <Step title="Verify">
+    After reboot, verify Windows 10 is restored:
+    ```powershell
+    Get-ComputerInfo | Select-Object WindowsProductName, WindowsVersion
+    ```
+  </Step>
+</Steps>
+
+### Restore Point Management
+
+```powershell
+# List all restore points
+Get-ComputerRestorePoint
+
+# Create manual restore point
+Checkpoint-Computer -Description "Before-Troubleshooting" -RestorePointType "MODIFY_SETTINGS"
+
+# Enable System Protection on C:
+Enable-ComputerRestore -Drive "C:"
+
+# Check System Protection status
+vssadmin list shadowstorage
+```
+
+<Warning>
+**Time Limit**: Windows 11 allows rollback to Windows 10 for only **10 days** after upgrade. After that, restore points are the only option.
+</Warning>
+
+## Network and Timeout Issues
+
+Long-running operations may encounter timeout issues.
+
+### Ansible Connection Settings
+
+The registry method includes extended connection parameters:
+
+```yaml /home/daytona/workspace/source/roles/fase_2/tasks/regedit_main.yml:78-79
+vars:
+  ansible_ssh_args: -o ControlMaster=no -o ServerAliveInterval=30
+```
+
+### Extending Timeouts
+
+Modify your Ansible configuration:
+
+```ini ansible.cfg
+[defaults]
+timeout = 60
+
+[winrm]
+operation_timeout_sec = 120
+read_timeout_sec = 180
+```
+
+### Reboot Handling
+
+The playbook uses extended reboot timeouts:
+
+```yaml
+ansible.windows.win_reboot:
+  msg: "El servidor se reiniciará para completar la instalación de Windows 11"
+  reboot_timeout: 3600  # 1 hour
+```
+
+## Getting Help
+
+<CardGroup cols={2}>
+  <Card title="Check Logs" icon="file-lines">
+    - Compatibility reports: `roles/fase_1/files/`
+    - Upgrade reports: `roles/fase_2/files/`
+    - Setup logs: `C:\temp\ansible\`
+  </Card>
+  
+  <Card title="Verify Configuration" icon="list-check">
+    - Run compatibility check manually
+    - Test WinRM connectivity
+    - Check system requirements
+  </Card>
+  
+  <Card title="Review Documentation" icon="book">
+    - [Compatibility Check](/operations/compatibility-check)
+    - [Upgrade Methods](/operations/upgrade-methods)
+    - Microsoft Windows 11 docs
+  </Card>
+  
+  <Card title="Ansible Debugging" icon="bug">
+    - Run with `-vvv` for verbose output
+    - Check Ansible logs
+    - Verify inventory configuration
+  </Card>
+</CardGroup>
+
+<Note>
+For persistent issues, review the specific task in the playbook that's failing and check the corresponding error handling blocks.
+</Note>
