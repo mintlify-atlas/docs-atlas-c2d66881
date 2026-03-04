@@ -1,0 +1,75 @@
+{
+  "projectType": "infrastructure",
+  "projectName": "Windows 10 to 11 Migration Tool",
+  "projectDescription": "Ansible automation for migrating Windows 10 Pro systems to Windows 11 with compatibility validation and automated upgrade workflows.",
+  "theme": "aspen",
+  "primaryColor": "#0078D4",
+  "lightColor": "#00A4EF",
+  "darkColor": "#005A9E",
+  "navigation": {
+    "groups": [
+      {
+        "group": "Getting Started",
+        "pages": [
+          "introduction",
+          "prerequisites",
+          "quickstart"
+        ]
+      },
+      {
+        "group": "Configuration",
+        "pages": [
+          "configuration/inventory",
+          "configuration/ansible-config",
+          "configuration/variables"
+        ]
+      },
+      {
+        "group": "Migration Phases",
+        "pages": [
+          "phases/overview",
+          "phases/phase-1",
+          "phases/phase-2"
+        ]
+      },
+      {
+        "group": "Operations",
+        "pages": [
+          "operations/compatibility-check",
+          "operations/upgrade-methods",
+          "operations/troubleshooting"
+        ]
+      },
+      {
+        "group": "Reference",
+        "pages": [
+          "reference/playbook-structure",
+          "reference/roles",
+          "reference/compatibility-requirements"
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Automated Windows 11 compatibility validation using WhyNotWin11",
+    "Two upgrade methods: Registry-based Windows Update and ISO-based installation",
+    "System restore point creation for rollback capability",
+    "WinRM configuration management for Ansible connectivity",
+    "Automated Windows Update patching pre and post-migration",
+    "Detailed compatibility and upgrade reporting"
+  ],
+  "publicApiSurface": [
+    "migra_w10_to_w11.yml - Main playbook for Windows 10 to 11 migration",
+    "fase_1 role - Pre-upgrade phase: OS validation, compatibility check, restore point creation",
+    "fase_2 role - Upgrade phase: WinRM setup, ISO mounting, upgrade execution",
+    "fase_2/regedit_main.yml - Registry-based upgrade method using Windows Update",
+    "ansible.cfg - Ansible configuration with inventory settings",
+    "maquinas - Inventory file with Windows host definitions and WinRM connection parameters",
+    "requirements.yml - Ansible Galaxy dependencies (community.windows collection)",
+    "fase_1_dir_whynotwin11 variable - Working directory path (default: C:\\temp\\ansible)",
+    "fase_2_dir_whynotwin11 variable - Working directory path for phase 2",
+    "WhyNotWin11.exe - Hardware compatibility validation tool",
+    "WinRM.ps1 - PowerShell script for WinRM configuration restoration",
+    "Win11_23H2_Spanish_Mexico_x64v2.iso - Windows 11 installation media"
+  ]
+}
